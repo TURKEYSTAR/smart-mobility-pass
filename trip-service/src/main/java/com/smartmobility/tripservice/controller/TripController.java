@@ -11,6 +11,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @RestController
@@ -76,5 +77,16 @@ public class TripController {
     @GetMapping("/health")
     public ResponseEntity<String> health() {
         return ResponseEntity.ok("Trip Management Service ✅ - Port 8082");
+    }
+
+    @GetMapping
+    public ResponseEntity<?> getTousLesTrajets(
+            @RequestHeader("X-User-Role") String userRole) {
+
+        if (!"ADMIN".equalsIgnoreCase(userRole)) {
+            return ResponseEntity.status(403)
+                    .body(Map.of("error", "Accès refusé : réservé aux ADMIN"));
+        }
+        return ResponseEntity.ok(tripService.getTousLesTrajets());
     }
 }

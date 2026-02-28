@@ -182,14 +182,14 @@ public class TripService {
 
     private BillingResponse debitAccount(Trip trip, BigDecimal amount) {
         BillingRequest billingRequest = BillingRequest.builder()
-                .passId(trip.getPassId())
+                .userID(trip.getUserId())
                 .tripId(trip.getId())
-                .amount(amount)
+                .montant(amount)
                 .description("Trajet " + trip.getTransportType()
                         + " : " + trip.getOrigin() + " → " + trip.getDestination())
                 .build();
 
-        BillingResponse billing = billingServiceClient.debitAccount(billingRequest);
+        BillingResponse billing = billingServiceClient.debitAccount(billingRequest, "trip-service");
         log.info("[apigateway] Débit effectué ✅ - TransactionId={}, Solde après : {} FCFA",
                 billing.getTransactionId(), billing.getBalanceAfter());
         return billing;
@@ -253,5 +253,10 @@ public class TripService {
                         ? "Trajet enregistré avec tarif standard (Pricing Service temporairement indisponible)"
                         : "Trajet enregistré avec succès")
                 .build();
+    }
+
+    @Transactional(readOnly = true)
+    public List<Trip> getTousLesTrajets() {
+        return tripRepository.findAll();
     }
 }

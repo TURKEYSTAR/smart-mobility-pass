@@ -31,36 +31,31 @@ public class UserController {
         this.userService = userService;
     }
 
-    // ── GET /api/users — liste tous ───────────────────────────────────────────
+    // GET /api/users — ADMIN uniquement (dashboard)
     @GetMapping
     public ResponseEntity<?> listerUtilisateurs(
             @RequestHeader("X-User-Role") String userRole) {
 
-        if (!hasRole(userRole, "MANAGER", "ADMIN")) {
-            return ResponseEntity.status(403)
-                    .body("Accès refusé : réservé aux MANAGER et ADMIN");
+        if (!isAdmin(userRole)) {
+            return ResponseEntity.status(403).body("Accès refusé : réservé aux ADMIN");
         }
-
-        List<UserResponse> users = userService.obtenirTousLesUtilisateurs();
-        return ResponseEntity.ok(users);
+        return ResponseEntity.ok(userService.obtenirTousLesUtilisateurs());
     }
 
-    // ── GET /api/users/{id} ───────────────────────────────────────────────────
+    // GET /api/users/{id} — son propre profil OU ADMIN
     @GetMapping("/{id}")
     public ResponseEntity<?> obtenirUtilisateur(
             @PathVariable Long id,
             @RequestHeader("X-User-Id")   String userId,
             @RequestHeader("X-User-Role") String userRole) {
 
-        if (!isOwnerOrRole(id, userId, userRole, "MANAGER", "ADMIN")) {
-            return ResponseEntity.status(403)
-                    .body("Accès refusé : vous ne pouvez voir que votre propre profil");
+        if (!isOwnerOrAdmin(id, userId, userRole)) {
+            return ResponseEntity.status(403).body("Accès refusé");
         }
-
         return ResponseEntity.ok(userService.obtenirUtilisateur(id));
     }
 
-    // ── PUT /api/users/{id} ───────────────────────────────────────────────────
+    // PUT /api/users/{id} — son propre profil OU ADMIN
     @PutMapping("/{id}")
     public ResponseEntity<?> mettreAJourUtilisateur(
             @PathVariable Long id,
@@ -68,45 +63,31 @@ public class UserController {
             @RequestHeader("X-User-Role") String userRole,
             @RequestBody UpdateUserRequest request) {
 
-        if (!isOwnerOrRole(id, userId, userRole, "ADMIN")) {
-            return ResponseEntity.status(403)
-                    .body("Accès refusé : vous ne pouvez modifier que votre propre profil");
+        if (!isOwnerOrAdmin(id, userId, userRole)) {
+            return ResponseEntity.status(403).body("Accès refusé");
         }
-
         return ResponseEntity.ok(userService.mettreAJourUtilisateur(id, request));
     }
 
-    // ── DELETE /api/users/{id} ────────────────────────────────────────────────
+    // DELETE /api/users/{id} — ADMIN uniquement
     @DeleteMapping("/{id}")
     public ResponseEntity<?> supprimerUtilisateur(
             @PathVariable Long id,
             @RequestHeader("X-User-Role") String userRole) {
 
-        if (!hasRole(userRole, "ADMIN")) {
-            return ResponseEntity.status(403)
-                    .body("Accès refusé : réservé aux ADMIN");
+        if (!isAdmin(userRole)) {
+            return ResponseEntity.status(403).body("Accès refusé : réservé aux ADMIN");
         }
-
         userService.supprimerUtilisateur(id);
         return ResponseEntity.noContent().build();
     }
 
     // ── Utilitaires ───────────────────────────────────────────────────────────
-
-    /**
-     * Retourne true si l'utilisateur connecté est le propriétaire de la ressource
-     * OU s'il possède l'un des rôles autorisés.
-     */
-    private boolean isOwnerOrRole(Long resourceId, String userId,
-                                  String userRole, String... allowedRoles) {
-        if (String.valueOf(resourceId).equals(userId)) return true;
-        return hasRole(userRole, allowedRoles);
+    private boolean isOwnerOrAdmin(Long resourceId, String userId, String userRole) {
+        return String.valueOf(resourceId).equals(userId) || isAdmin(userRole);
     }
 
-    private boolean hasRole(String userRole, String... allowedRoles) {
-        for (String role : allowedRoles) {
-            if (role.equalsIgnoreCase(userRole)) return true;
-        }
-        return false;
+    private boolean isAdmin(String userRole) {
+        return "ADMIN".equalsIgnoreCase(userRole);
     }
 }

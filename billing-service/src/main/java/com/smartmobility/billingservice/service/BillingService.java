@@ -12,8 +12,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -23,7 +26,7 @@ public class BillingService {
     private static final Logger log = LoggerFactory.getLogger(BillingService.class);
 
     // Le billing-service se comporte comme un MANAGER pour tous ses appels internes
-    private static final String INTERNAL_ROLE = "MANAGER";
+    private static final String INTERNAL_ROLE = "ADMIN";
 
     private final TransactionRepository transactionRepository;
     private final UserServiceClient userServiceClient;
@@ -139,5 +142,37 @@ public class BillingService {
         response.setDescription(t.getDescription());
         response.setCreatedAt(t.getCreatedAt());
         return response;
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, Object> obtenirStatsJour() {
+        List<Transaction> toutes = transactionRepository.findAllByOrderByCreatedAtDesc();
+
+        LocalDateTime debutJour = LocalDate.now().atStartOfDay();
+        List<Transaction> duJour = toutes.stream()
+                .filter(t -> t.getCreatedAt().isAfter(debutJour))
+                .collect(Collectors.toList());
+
+        BigDecimal totalDebits = duJour.stream()
+                .filter(t -> t.getType() == TransactionType.DEBIT
+                        && t.getStatus() == TransactionStatus.SUCCESS)
+                .map(Transaction::getMontant)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        BigDecimal totalCredits = duJour.stream()
+                .filter(t -> t.getType() == TransactionType.CREDIT
+                        && t.getStatus() == TransactionStatus.SUCCESS)
+                .map(Transaction::getMontant)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        return Map.of(
+                "date",          LocalDate.now().toString(),
+                "totalDebits",   totalDebits,
+                "totalCredits",  totalCredits,
+                "nbTransactions", duJour.size(),
+                "nbEchecs",      duJour.stream()
+                        .filter(t -> t.getStatus() == TransactionStatus.FAILED)
+                        .count()
+        );
     }
 }

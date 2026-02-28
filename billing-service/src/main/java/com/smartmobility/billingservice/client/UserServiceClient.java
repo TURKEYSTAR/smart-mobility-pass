@@ -26,48 +26,26 @@ import java.util.UUID;
 @FeignClient(name = "user-service")
 public interface UserServiceClient {
 
-    /**
-     * PUT /api/users/{userId}/pass/debiter
-     *
-     * PassMobilityController.debiterSolde() attend :
-     *   @RequestHeader("X-User-Role") String userRole
-     * → seul MANAGER/ADMIN autorisé → on envoie "MANAGER"
-     */
+    // billing-service se présente comme ADMIN pour les appels internes
     @PutMapping("/api/users/{userId}/pass/debiter")
     ApiResponse<PassResponse> debiterSolde(
             @PathVariable("userId") UUID userId,
             @RequestBody UpdateSoldeRequest request,
-            @RequestHeader("X-User-Role") String role
+            @RequestHeader("X-User-Role") String role   // enverra "ADMIN"
     );
 
-    /**
-     * PUT /api/users/{userId}/pass/recharger
-     *
-     * PassMobilityController.rechargerSolde() attend :
-     *   @RequestHeader("X-User-Id")   String userId   ← l'userId cible
-     *   @RequestHeader("X-User-Role") String userRole
-     * → propriétaire OU MANAGER/ADMIN autorisé
-     * → on envoie l'userId cible + "MANAGER"
-     */
     @PutMapping("/api/users/{userId}/pass/recharger")
     ApiResponse<PassResponse> rechargerSolde(
             @PathVariable("userId") UUID userId,
             @RequestBody UpdateSoldeRequest request,
             @RequestHeader("X-User-Id") String userIdHeader,
-            @RequestHeader("X-User-Role") String role
+            @RequestHeader("X-User-Role") String role   // enverra "ADMIN"
     );
 
-    /**
-     * GET /api/users/{userId}/pass
-     *
-     * PassMobilityController.obtenirPass() attend :
-     *   @RequestHeader("X-User-Id")   String userId
-     *   @RequestHeader("X-User-Role") String userRole
-     */
     @GetMapping("/api/users/{userId}/pass")
     ApiResponse<PassResponse> getPass(
             @PathVariable("userId") UUID userId,
             @RequestHeader("X-User-Id") String userIdHeader,
-            @RequestHeader("X-User-Role") String role
+            @RequestHeader("X-User-Role") String role   // enverra "ADMIN"
     );
 }

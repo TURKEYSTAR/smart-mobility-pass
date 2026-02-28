@@ -21,10 +21,7 @@ public class BillingController {
         this.billingService = billingService;
     }
 
-    // ── POST /api/billing/debit ───────────────────────────────────────────────
-    // ⚠️  Appelé UNIQUEMENT par trip-service via Feign automatiquement.
-    //     Aucun utilisateur ne doit appeler ce endpoint directement.
-    //     Le trip-service s'identifie avec le header X-Internal-Service.
+    // POST /api/billing/debit — trip-service uniquement via X-Internal-Service
     @PostMapping("/debit")
     public ResponseEntity<?> debiter(
             @RequestBody DebitRequest request,
@@ -43,8 +40,7 @@ public class BillingController {
         }
     }
 
-    // ── POST /api/billing/recharge ────────────────────────────────────────────
-    // USER recharge son propre pass — MANAGER/ADMIN peuvent tout recharger
+    // POST /api/billing/recharge — son propre pass OU ADMIN
     @PostMapping("/recharge")
     public ResponseEntity<?> recharger(
             @RequestBody RechargeRequest request,
@@ -52,9 +48,9 @@ public class BillingController {
             @RequestHeader("X-User-Role") String userRole) {
 
         boolean estProprietaire = String.valueOf(request.getUserId()).equals(userId);
-        boolean estPrivilegie   = hasRole(userRole, "MANAGER", "ADMIN");
+        boolean estAdmin        = "ADMIN".equalsIgnoreCase(userRole);
 
-        if (!estProprietaire && !estPrivilegie) {
+        if (!estProprietaire && !estAdmin) {
             return ResponseEntity.status(403)
                     .body(Map.of("error", "Accès refusé : vous ne pouvez recharger que votre propre pass"));
         }
@@ -67,7 +63,7 @@ public class BillingController {
         }
     }
 
-    // ── GET /api/billing/history/{userId} ─────────────────────────────────────
+    // GET /api/billing/history/{userId} — son propre historique OU ADMIN
     @GetMapping("/history/{userId}")
     public ResponseEntity<?> obtenirHistorique(
             @PathVariable Long userId,
@@ -75,16 +71,15 @@ public class BillingController {
             @RequestHeader("X-User-Role") String userRole) {
 
         boolean estProprietaire = String.valueOf(userId).equals(currentUserId);
-        boolean estPrivilegie   = hasRole(userRole, "MANAGER", "ADMIN");
+        boolean estAdmin        = "ADMIN".equalsIgnoreCase(userRole);
 
-        if (!estProprietaire && !estPrivilegie) {
+        if (!estProprietaire && !estAdmin) {
             return ResponseEntity.status(403).body(Map.of("error", "Accès refusé"));
         }
-
         return ResponseEntity.ok(billingService.obtenirHistorique(userId));
     }
 
-    // ── GET /api/billing/transaction/{id} ─────────────────────────────────────
+    // GET /api/billing/transaction/{id} — sa propre transaction OU ADMIN
     @GetMapping("/transaction/{id}")
     public ResponseEntity<?> obtenirTransaction(
             @PathVariable Long id,
@@ -95,22 +90,24 @@ public class BillingController {
             TransactionResponse transaction = billingService.obtenirTransaction(id);
 
             boolean estProprietaire = String.valueOf(transaction.getUserId()).equals(userId);
-            boolean estPrivilegie   = hasRole(userRole, "MANAGER", "ADMIN");
+            boolean estAdmin        = "ADMIN".equalsIgnoreCase(userRole);
 
-            if (!estProprietaire && !estPrivilegie) {
+            if (!estProprietaire && !estAdmin) {
                 return ResponseEntity.status(403).body(Map.of("error", "Accès refusé"));
             }
-
             return ResponseEntity.ok(transaction);
         } catch (RuntimeException e) {
             return ResponseEntity.status(404).body(Map.of("error", e.getMessage()));
         }
     }
 
-    private boolean hasRole(String userRole, String... allowedRoles) {
-        for (String role : allowedRoles) {
-            if (role.equalsIgnoreCase(userRole)) return true;
+    @GetMapping("/stats")
+    public ResponseEntity<?> obtenirStats(
+            @RequestHeader("X-User-Role") String userRole) {
+
+        if (!"ADMIN".equalsIgnoreCase(userRole)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Accès refusé"));
         }
-        return false;
+        return ResponseEntity.ok(billingService.obtenirStatsJour());
     }
 }

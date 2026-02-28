@@ -32,78 +32,71 @@ public class PassMobilityController {
         this.passMobilityService = passMobilityService;
     }
 
-    // ── GET /api/users/{id}/pass ──────────────────────────────────────────────
+    // GET /api/users/{id}/pass — son propre pass OU ADMIN
     @GetMapping
     public ResponseEntity<?> obtenirPass(
             @PathVariable Long id,
             @RequestHeader("X-User-Id")   String userId,
             @RequestHeader("X-User-Role") String userRole) {
 
-        if (!isOwnerOrRole(id, userId, userRole, "ADMIN")) {
+        if (!isOwnerOrAdmin(id, userId, userRole)) {
             return ResponseEntity.status(403).body("Accès refusé");
         }
-
         return ResponseEntity.ok(passMobilityService.obtenirPass(id));
     }
 
-    // ── PUT /api/users/{id}/pass/suspendre ────────────────────────────────────
+    // PUT /pass/suspendre — ADMIN uniquement
     @PutMapping("/suspendre")
     public ResponseEntity<?> suspendrePass(
             @PathVariable Long id,
             @RequestHeader("X-User-Role") String userRole) {
 
-        if (!hasRole(userRole,"ADMIN")) {
-            return ResponseEntity.status(403)
-                    .body("Accès refusé : réservé aux ADMIN");
+        if (!isAdmin(userRole)) {
+            return ResponseEntity.status(403).body("Accès refusé : réservé aux ADMIN");
         }
-
         return ResponseEntity.ok(passMobilityService.suspendrePass(id));
     }
 
-    // ── PUT /api/users/{id}/pass/activer ──────────────────────────────────────
+    // PUT /pass/activer — ADMIN uniquement
     @PutMapping("/activer")
     public ResponseEntity<?> activerPass(
             @PathVariable Long id,
             @RequestHeader("X-User-Role") String userRole) {
 
-        if (!hasRole(userRole, "ADMIN")) {
-            return ResponseEntity.status(403)
-                    .body("Accès refusé : réservé aux ADMIN");
+        if (!isAdmin(userRole)) {
+            return ResponseEntity.status(403).body("Accès refusé : réservé aux ADMIN");
         }
-
         return ResponseEntity.ok(passMobilityService.activerPass(id));
     }
 
-    // ── PUT /api/users/{id}/pass/renouveler ───────────────────────────────────
+    // PUT /pass/renouveler — son propre pass OU ADMIN
     @PutMapping("/renouveler")
     public ResponseEntity<?> renouvellerPass(
             @PathVariable Long id,
             @RequestHeader("X-User-Id")   String userId,
             @RequestHeader("X-User-Role") String userRole) {
 
-        if (!isOwnerOrRole(id, userId, userRole, "ADMIN")) {
+        if (!isOwnerOrAdmin(id, userId, userRole)) {
             return ResponseEntity.status(403).body("Accès refusé");
         }
-
         return ResponseEntity.ok(passMobilityService.renouvellerPass(id));
     }
 
-    // ── PUT /api/users/{id}/pass/debiter ──────────────────────────────────────
-    // Appelé par billing-service via Feign (interne)
+    // PUT /pass/debiter — appelé UNIQUEMENT par billing-service (interne)
+    // billing-service envoie X-User-Role: ADMIN
     @PutMapping("/debiter")
     public ResponseEntity<?> debiterSolde(
             @PathVariable Long id,
             @RequestHeader("X-User-Role") String userRole,
             @RequestBody UpdateSoldeRequest request) {
 
-        if (!hasRole(userRole, "ADMIN")) {
+        if (!isAdmin(userRole)) {
             return ResponseEntity.status(403).body("Accès refusé");
         }
-
         return ResponseEntity.ok(passMobilityService.debiterSolde(id, request));
     }
 
-    // ── PUT /api/users/{id}/pass/recharger ────────────────────────────────────
+    // PUT /pass/recharger — son propre pass OU ADMIN
     @PutMapping("/recharger")
     public ResponseEntity<?> rechargerSolde(
             @PathVariable Long id,
@@ -111,25 +104,18 @@ public class PassMobilityController {
             @RequestHeader("X-User-Role") String userRole,
             @RequestBody UpdateSoldeRequest request) {
 
-        if (!isOwnerOrRole(id, userId, userRole, "MANAGER", "ADMIN")) {
+        if (!isOwnerOrAdmin(id, userId, userRole)) {
             return ResponseEntity.status(403).body("Accès refusé");
         }
-
         return ResponseEntity.ok(passMobilityService.rechargerSolde(id, request));
     }
 
     // ── Utilitaires ───────────────────────────────────────────────────────────
-
-    private boolean isOwnerOrRole(Long resourceId, String userId,
-                                  String userRole, String... allowedRoles) {
-        if (String.valueOf(resourceId).equals(userId)) return true;
-        return hasRole(userRole, allowedRoles);
+    private boolean isOwnerOrAdmin(Long resourceId, String userId, String userRole) {
+        return String.valueOf(resourceId).equals(userId) || isAdmin(userRole);
     }
 
-    private boolean hasRole(String userRole, String... allowedRoles) {
-        for (String role : allowedRoles) {
-            if (role.equalsIgnoreCase(userRole)) return true;
-        }
-        return false;
+    private boolean isAdmin(String userRole) {
+        return "ADMIN".equalsIgnoreCase(userRole);
     }
 }
