@@ -4,10 +4,11 @@ import com.smartmobility.userservice.entity.PassStatus;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 public class UserResponse {
 
-    private Long id;
+    private UUID id;
     private String nom;
     private String prenom;
     private String username;
@@ -23,11 +24,11 @@ public class UserResponse {
     public UserResponse() {
     }
 
-    public Long getId() {
+    public UUID getId() {
         return id;
     }
 
-    public void setId(Long id) {
+    public void setId(UUID id) {
         this.id = id;
     }
 

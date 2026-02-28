@@ -1,7 +1,9 @@
 package com.smartmobility.authservice.dto;
 
+import java.util.UUID;
+
 public record UserDto(
-        Long id,
+        UUID id,
         String email,
         String password,   // hash BCrypt — utilisé pour vérifier le mot de passe
         String nom,

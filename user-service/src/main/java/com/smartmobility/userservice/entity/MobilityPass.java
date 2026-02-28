@@ -7,6 +7,7 @@ import java.time.LocalDateTime;
 @Entity
 public class MobilityPass {
     @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     String passNumber; // généré (UUID ou format custom)

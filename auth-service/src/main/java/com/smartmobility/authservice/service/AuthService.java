@@ -141,11 +141,19 @@ public class AuthService {
     /**
      * Cherche un user par email sans lever d'exception si non trouvé (404).
      * Feign lève FeignException.NotFound → on retourne null.
-     */
+     *
     private UserDto findUserByEmailSafe(String email) {
         try {
             return userServiceClient.findByEmail(email);
         } catch (FeignException.NotFound e) {
+            return null;
+        }
+    }*/
+    private UserDto findUserByEmailSafe(String email) {
+        try {
+            return userServiceClient.findByEmail(email);
+        } catch (Exception e) { // Capture plus large pour le debug
+            log.warn("Utilisateur non trouvé ou erreur service : {}", email);
             return null;
         }
     }
