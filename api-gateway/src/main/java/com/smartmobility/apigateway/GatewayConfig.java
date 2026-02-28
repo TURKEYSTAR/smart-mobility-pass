@@ -15,20 +15,20 @@ public class GatewayConfig {
                         .path("/api/users/**", "/api/passes/**")
                         .uri("lb://USER-SERVICE"))
 
-                .route(p -> p
-                        .path("/api/trips/**")
+                // nouvelles routes
+                .route(p -> p.path("/api/trips/**")
+                        .filters(f -> f.stripPrefix(1))
                         .uri("lb://TRIP-SERVICE"))
-
-                .route(p -> p
-                        .path("/api/pricing/**")
+                .route(p -> p.path("/api/pricing/**")
+                        .filters(f -> f.stripPrefix(1))
                         .uri("lb://PRICING-SERVICE"))
 
                 .route(p -> p
                         .path("/api/billing/**")
                         .uri("lb://BILLING-SERVICE"))
 
-                .route(p -> p
-                        .path("/api/notifications/**")
+                .route(p -> p.path("/api/notifications/**")
+                        .filters(f -> f.stripPrefix(1))
                         .uri("lb://NOTIFICATION-SERVICE"))
 
                 .build();
