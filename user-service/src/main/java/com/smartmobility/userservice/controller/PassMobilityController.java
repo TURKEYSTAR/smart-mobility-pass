@@ -39,7 +39,7 @@ public class PassMobilityController {
             @RequestHeader("X-User-Id")   String userId,
             @RequestHeader("X-User-Role") String userRole) {
 
-        if (!isOwnerOrRole(id, userId, userRole, "MANAGER", "ADMIN")) {
+        if (!isOwnerOrRole(id, userId, userRole, "ADMIN")) {
             return ResponseEntity.status(403).body("Accès refusé");
         }
 
@@ -52,9 +52,9 @@ public class PassMobilityController {
             @PathVariable Long id,
             @RequestHeader("X-User-Role") String userRole) {
 
-        if (!hasRole(userRole, "MANAGER", "ADMIN")) {
+        if (!hasRole(userRole,"ADMIN")) {
             return ResponseEntity.status(403)
-                    .body("Accès refusé : réservé aux MANAGER et ADMIN");
+                    .body("Accès refusé : réservé aux ADMIN");
         }
 
         return ResponseEntity.ok(passMobilityService.suspendrePass(id));
@@ -66,9 +66,9 @@ public class PassMobilityController {
             @PathVariable Long id,
             @RequestHeader("X-User-Role") String userRole) {
 
-        if (!hasRole(userRole, "MANAGER", "ADMIN")) {
+        if (!hasRole(userRole, "ADMIN")) {
             return ResponseEntity.status(403)
-                    .body("Accès refusé : réservé aux MANAGER et ADMIN");
+                    .body("Accès refusé : réservé aux ADMIN");
         }
 
         return ResponseEntity.ok(passMobilityService.activerPass(id));
@@ -81,7 +81,7 @@ public class PassMobilityController {
             @RequestHeader("X-User-Id")   String userId,
             @RequestHeader("X-User-Role") String userRole) {
 
-        if (!isOwnerOrRole(id, userId, userRole, "MANAGER", "ADMIN")) {
+        if (!isOwnerOrRole(id, userId, userRole, "ADMIN")) {
             return ResponseEntity.status(403).body("Accès refusé");
         }
 
@@ -96,7 +96,7 @@ public class PassMobilityController {
             @RequestHeader("X-User-Role") String userRole,
             @RequestBody UpdateSoldeRequest request) {
 
-        if (!hasRole(userRole, "MANAGER", "ADMIN")) {
+        if (!hasRole(userRole, "ADMIN")) {
             return ResponseEntity.status(403).body("Accès refusé");
         }
 

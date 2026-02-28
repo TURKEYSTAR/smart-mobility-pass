@@ -7,6 +7,8 @@ import com.smartmobility.billingservice.entity.TransactionStatus;
 import com.smartmobility.billingservice.entity.TransactionType;
 import com.smartmobility.billingservice.exception.TransactionNotFoundException;
 import com.smartmobility.billingservice.repository.TransactionRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,6 +20,11 @@ import java.util.stream.Collectors;
 @Transactional
 public class BillingService {
 
+    private static final Logger log = LoggerFactory.getLogger(BillingService.class);
+
+    // Le billing-service se comporte comme un MANAGER pour tous ses appels internes
+    private static final String INTERNAL_ROLE = "MANAGER";
+
     private final TransactionRepository transactionRepository;
     private final UserServiceClient userServiceClient;
 
@@ -27,10 +34,7 @@ public class BillingService {
         this.userServiceClient = userServiceClient;
     }
 
-    // ───────────────────────────────────────────────
-    // Débiter le compte d'un utilisateur après un trajet
-    // Appelé par trip-service
-    // ───────────────────────────────────────────────
+    // ── Débiter le compte après un trajet ─────────────────────────────────────
     public TransactionResponse debiter(DebitRequest request) {
 
         Transaction transaction = new Transaction();
@@ -39,28 +43,29 @@ public class BillingService {
         transaction.setMontant(request.getMontant());
         transaction.setType(TransactionType.DEBIT);
         transaction.setCreatedAt(LocalDateTime.now());
-        transaction.setDescription(
-                request.getDescription() != null
-                        ? request.getDescription()
-                        : "Paiement trajet #" + request.getTripId());
+        transaction.setDescription(request.getDescription() != null
+                ? request.getDescription()
+                : "Paiement trajet #" + request.getTripId());
 
         try {
-            // Appel Feign → user-service débite le solde
-            UpdateSoldeRequest soldeRequest = new UpdateSoldeRequest(request.getMontant());
-            ApiResponse<PassResponse> passResponse =
-                    userServiceClient.debiterSolde(request.getUserId(), soldeRequest);
+            // ✅ Appel Feign — billing envoie MANAGER comme rôle
+            // debiterSolde attend : userId, request, X-User-Role
+            ApiResponse<PassResponse> passResponse = userServiceClient.debiterSolde(
+                    request.getUserId(),
+                    new UpdateSoldeRequest(request.getMontant()),
+                    INTERNAL_ROLE   // ← "MANAGER" — pas besoin de le recevoir du client
+            );
 
             transaction.setStatus(TransactionStatus.SUCCESS);
             Transaction saved = transactionRepository.save(transaction);
 
             TransactionResponse response = mapToResponse(saved);
-            // On retourne le solde restant après opération
             response.setSoldeApresOperation(passResponse.getData().getSolde());
             return response;
 
         } catch (Exception e) {
-            // Si user-service échoue (solde insuffisant, pass suspendu/expiré)
-            // on enregistre quand même la transaction en FAILED pour traçabilité
+            // Enregistre la transaction FAILED pour traçabilité
+            log.error("Débit échoué pour userId={} : {}", request.getUserId(), e.getMessage());
             transaction.setStatus(TransactionStatus.FAILED);
             transaction.setDescription("ÉCHEC - " + e.getMessage());
             transactionRepository.save(transaction);
@@ -68,9 +73,7 @@ public class BillingService {
         }
     }
 
-    // ───────────────────────────────────────────────
-    // Recharger le solde d'un utilisateur
-    // ───────────────────────────────────────────────
+    // ── Recharger le solde ────────────────────────────────────────────────────
     public TransactionResponse recharger(RechargeRequest request) {
 
         Transaction transaction = new Transaction();
@@ -80,10 +83,14 @@ public class BillingService {
         transaction.setCreatedAt(LocalDateTime.now());
         transaction.setDescription("Recharge du solde : +" + request.getMontant() + " FCFA");
 
-        // Appel Feign → user-service crédite le solde
-        UpdateSoldeRequest soldeRequest = new UpdateSoldeRequest(request.getMontant());
-        ApiResponse<PassResponse> passResponse =
-                userServiceClient.rechargerSolde(request.getUserId(), soldeRequest);
+        // ✅ Appel Feign — rechargerSolde attend :
+        //    userId, request, X-User-Id (userId cible en String), X-User-Role
+        ApiResponse<PassResponse> passResponse = userServiceClient.rechargerSolde(
+                request.getUserId(),
+                new UpdateSoldeRequest(request.getMontant()),
+                String.valueOf(request.getUserId()),  // ← X-User-Id = userId cible
+                INTERNAL_ROLE                         // ← X-User-Role = "MANAGER"
+        );
 
         transaction.setStatus(TransactionStatus.SUCCESS);
         Transaction saved = transactionRepository.save(transaction);
@@ -93,9 +100,7 @@ public class BillingService {
         return response;
     }
 
-    // ───────────────────────────────────────────────
-    // Historique complet des transactions d'un utilisateur
-    // ───────────────────────────────────────────────
+    // ── Historique complet ────────────────────────────────────────────────────
     @Transactional(readOnly = true)
     public List<TransactionResponse> obtenirHistorique(Long userId) {
         return transactionRepository.findByUserIdOrderByCreatedAtDesc(userId)
@@ -104,9 +109,7 @@ public class BillingService {
                 .collect(Collectors.toList());
     }
 
-    // ───────────────────────────────────────────────
-    // Historique uniquement des débits (trajets payés)
-    // ───────────────────────────────────────────────
+    // ── Historique débits uniquement ──────────────────────────────────────────
     @Transactional(readOnly = true)
     public List<TransactionResponse> obtenirHistoriqueDebits(Long userId) {
         return transactionRepository
@@ -116,9 +119,7 @@ public class BillingService {
                 .collect(Collectors.toList());
     }
 
-    // ───────────────────────────────────────────────
-    // Détail d'une transaction par ID
-    // ───────────────────────────────────────────────
+    // ── Détail d'une transaction ──────────────────────────────────────────────
     @Transactional(readOnly = true)
     public TransactionResponse obtenirTransaction(Long transactionId) {
         Transaction transaction = transactionRepository.findById(transactionId)
@@ -126,19 +127,17 @@ public class BillingService {
         return mapToResponse(transaction);
     }
 
-    // ───────────────────────────────────────────────
-    // Mapper
-    // ───────────────────────────────────────────────
-    private TransactionResponse mapToResponse(Transaction transaction) {
+    // ── Mapper ────────────────────────────────────────────────────────────────
+    private TransactionResponse mapToResponse(Transaction t) {
         TransactionResponse response = new TransactionResponse();
-        response.setId(transaction.getId());
-        response.setUserId(transaction.getUserId());
-        response.setTripId(transaction.getTripId());
-        response.setMontant(transaction.getMontant());
-        response.setType(transaction.getType());
-        response.setStatus(transaction.getStatus());
-        response.setDescription(transaction.getDescription());
-        response.setCreatedAt(transaction.getCreatedAt());
+        response.setId(t.getId());
+        response.setUserId(t.getUserId());
+        response.setTripId(t.getTripId());
+        response.setMontant(t.getMontant());
+        response.setType(t.getType());
+        response.setStatus(t.getStatus());
+        response.setDescription(t.getDescription());
+        response.setCreatedAt(t.getCreatedAt());
         return response;
     }
 }

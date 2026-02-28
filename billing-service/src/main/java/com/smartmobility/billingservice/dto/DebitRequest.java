@@ -4,14 +4,15 @@ import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotNull;
 
 import java.math.BigDecimal;
+import java.util.UUID;
 
 public class DebitRequest {
 
     @NotNull(message = "L'identifiant utilisateur est obligatoire")
-    private Long userId;
+    private UUID userId;
 
     // tripId peut être null pour un débit manuel (hors trajet)
-    private Long tripId;
+    private UUID tripId;
 
     @NotNull(message = "Le montant est obligatoire")
     @DecimalMin(value = "0.0", inclusive = false, message = "Le montant doit être positif")
@@ -22,19 +23,19 @@ public class DebitRequest {
     public DebitRequest() {
     }
 
-    public Long getUserId() {
+    public UUID getUserId() {
         return userId;
     }
 
-    public void setUserId(Long userId) {
+    public void setUserId(UUID userId) {
         this.userId = userId;
     }
 
-    public Long getTripId() {
+    public UUID getTripId() {
         return tripId;
     }
 
-    public void setTripId(Long tripId) {
+    public void setTripId(UUID tripId) {
         this.tripId = tripId;
     }
 

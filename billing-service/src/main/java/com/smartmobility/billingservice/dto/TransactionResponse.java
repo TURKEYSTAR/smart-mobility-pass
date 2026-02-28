@@ -5,12 +5,13 @@ import com.smartmobility.billingservice.entity.TransactionType;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 public class TransactionResponse {
 
-    private Long id;
-    private Long userId;
-    private Long tripId;
+    private UUID id;
+    private UUID userId;
+    private UUID tripId;
     private BigDecimal montant;
     private TransactionType type;
     private TransactionStatus status;
@@ -23,27 +24,27 @@ public class TransactionResponse {
     public TransactionResponse() {
     }
 
-    public Long getId() {
+    public UUID getId() {
         return id;
     }
 
-    public void setId(Long id) {
+    public void setId(UUID id) {
         this.id = id;
     }
 
-    public Long getUserId() {
+    public UUID getUserId() {
         return userId;
     }
 
-    public void setUserId(Long userId) {
+    public void setUserId(UUID userId) {
         this.userId = userId;
     }
 
-    public Long getTripId() {
+    public UUID getTripId() {
         return tripId;
     }
 
-    public void setTripId(Long tripId) {
+    public void setTripId(UUID tripId) {
         this.tripId = tripId;
     }
 

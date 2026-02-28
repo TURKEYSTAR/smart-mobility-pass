@@ -1,20 +1,22 @@
 package com.smartmobility.billingservice.dto;
 
-import com.smartmobility.userservice.entity.PassStatus;
+import com.smartmobility.billingservice.entity.PassStatus;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 public class PassResponse {
 
-    private Long id;
+    private UUID id;
     private String passNumber;
     private PassStatus status;
-    private Double solde;
+    private BigDecimal solde;
     private LocalDateTime createdAt;
     private LocalDateTime expirationDate;
 
     // userId utile pour les appels inter-services
-    private Long userId;
+    private UUID userId;
 
     // Champ calculé : indique si le pass est expiré au moment de la réponse
     public boolean isExpired() {
@@ -24,11 +26,11 @@ public class PassResponse {
     public PassResponse() {
     }
 
-    public Long getId() {
+    public UUID getId() {
         return id;
     }
 
-    public void setId(Long id) {
+    public void setId(UUID id) {
         this.id = id;
     }
 
@@ -48,11 +50,11 @@ public class PassResponse {
         this.status = status;
     }
 
-    public Double getSolde() {
+    public BigDecimal getSolde() {
         return solde;
     }
 
-    public void setSolde(Double solde) {
+    public void setSolde(BigDecimal solde) {
         this.solde = solde;
     }
 
@@ -72,11 +74,11 @@ public class PassResponse {
         this.expirationDate = expirationDate;
     }
 
-    public Long getUserId() {
+    public UUID getUserId() {
         return userId;
     }
 
-    public void setUserId(Long userId) {
+    public void setUserId(UUID userId) {
         this.userId = userId;
     }
 }

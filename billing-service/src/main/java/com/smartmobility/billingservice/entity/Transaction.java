@@ -15,7 +15,7 @@ public class Transaction {
 
     // userId — Long car c'est l'ID de l'entité User en BDD
     @Column(nullable = false)
-    private Long userId;
+    private UUID userId;
 
     // passId — UUID comme dans le trip-service
     @Column(nullable = false)
@@ -43,7 +43,7 @@ public class Transaction {
 
     // Statut : SUCCESS, FAILED
     @Column(nullable = false)
-    private String status;
+    private TransactionStatus status;
 
     @Column(nullable = false)
     private LocalDateTime createdAt;
@@ -53,8 +53,8 @@ public class Transaction {
     public UUID getId() { return id; }
     public void setId(UUID id) { this.id = id; }
 
-    public Long getUserId() { return userId; }
-    public void setUserId(Long userId) { this.userId = userId; }
+    public UUID getUserId() { return userId; }
+    public void setUserId(UUID userId) { this.userId = userId; }
 
     public UUID getPassId() { return passId; }
     public void setPassId(UUID passId) { this.passId = passId; }
@@ -77,8 +77,8 @@ public class Transaction {
     public BigDecimal getSoldeApres() { return soldeApres; }
     public void setSoldeApres(BigDecimal soldeApres) { this.soldeApres = soldeApres; }
 
-    public String getStatus() { return status; }
-    public void setStatus(String status) { this.status = status; }
+    public TransactionStatus getStatus() { return status; }
+    public void setStatus(TransactionStatus status) { this.status = status; }
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
