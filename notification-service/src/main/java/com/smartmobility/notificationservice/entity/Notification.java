@@ -44,7 +44,7 @@ public class Notification {
     @Column(name = "balance_after", precision = 10, scale = 2)
     private BigDecimal balanceAfter;
 
-    @Column(name = "read", nullable = false)
+    @Column(name = "is_read", nullable = false)
     @Builder.Default
     private boolean read = false;
 

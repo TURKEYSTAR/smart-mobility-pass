@@ -17,6 +17,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
@@ -25,7 +26,7 @@ public class BillingService {
 
     private static final Logger log = LoggerFactory.getLogger(BillingService.class);
 
-    // Le billing-service se comporte comme un MANAGER pour tous ses appels internes
+    // Le billing-service se présente comme ADMIN pour tous ses appels vers user-service
     private static final String INTERNAL_ROLE = "ADMIN";
 
     private final TransactionRepository transactionRepository;
@@ -37,7 +38,8 @@ public class BillingService {
         this.userServiceClient = userServiceClient;
     }
 
-    // ── Débiter le compte après un trajet ─────────────────────────────────────
+    // ── Débiter après un trajet ───────────────────────────────────────────────
+
     public TransactionResponse debiter(DebitRequest request) {
 
         Transaction transaction = new Transaction();
@@ -51,32 +53,44 @@ public class BillingService {
                 : "Paiement trajet #" + request.getTripId());
 
         try {
-            // ✅ Appel Feign — billing envoie MANAGER comme rôle
-            // debiterSolde attend : userId, request, X-User-Role
-            ApiResponse<PassResponse> passResponse = userServiceClient.debiterSolde(
+            // Récupère d'abord le pass pour avoir le passId
+            PassResponse passInfo = userServiceClient.getPass(
                     request.getUserId(),
-                    new UpdateSoldeRequest(request.getMontant()),
-                    INTERNAL_ROLE   // ← "MANAGER" — pas besoin de le recevoir du client
+                    request.getUserId().toString(),
+                    INTERNAL_ROLE
             );
 
+            UUID passId = passInfo.getId();
+            transaction.setPassId(passId);
+
+            // Débite le solde
+            PassResponse passResponse = userServiceClient.debiterSolde(
+                    request.getUserId(),
+                    new UpdateSoldeRequest(request.getMontant()),
+                    request.getUserId().toString(),
+                    INTERNAL_ROLE
+            );
+
+            transaction.setSoldeApres(passResponse.getSolde());
             transaction.setStatus(TransactionStatus.SUCCESS);
             Transaction saved = transactionRepository.save(transaction);
 
             TransactionResponse response = mapToResponse(saved);
-            response.setSoldeApresOperation(passResponse.getData().getSolde());
+            response.setSoldeApresOperation(passResponse.getSolde());
             return response;
 
         } catch (Exception e) {
-            // Enregistre la transaction FAILED pour traçabilité
             log.error("Débit échoué pour userId={} : {}", request.getUserId(), e.getMessage());
             transaction.setStatus(TransactionStatus.FAILED);
             transaction.setDescription("ÉCHEC - " + e.getMessage());
+            transaction.setSoldeApres(BigDecimal.ZERO);
             transactionRepository.save(transaction);
             throw new IllegalArgumentException("Débit impossible : " + e.getMessage());
         }
     }
 
     // ── Recharger le solde ────────────────────────────────────────────────────
+
     public TransactionResponse recharger(RechargeRequest request) {
 
         Transaction transaction = new Transaction();
@@ -86,63 +100,72 @@ public class BillingService {
         transaction.setCreatedAt(LocalDateTime.now());
         transaction.setDescription("Recharge du solde : +" + request.getMontant() + " FCFA");
 
-        // ✅ Appel Feign — rechargerSolde attend :
-        //    userId, request, X-User-Id (userId cible en String), X-User-Role
-        ApiResponse<PassResponse> passResponse = userServiceClient.rechargerSolde(
-                request.getUserId(),
-                new UpdateSoldeRequest(request.getMontant()),
-                String.valueOf(request.getUserId()),  // ← X-User-Id = userId cible
-                INTERNAL_ROLE                         // ← X-User-Role = "MANAGER"
-        );
+        try {
+            // Récupère le pass pour avoir le passId
+            PassResponse passInfo = userServiceClient.getPass(
+                    request.getUserId(),
+                    request.getUserId().toString(),
+                    INTERNAL_ROLE
+            );
 
-        transaction.setStatus(TransactionStatus.SUCCESS);
-        Transaction saved = transactionRepository.save(transaction);
+            UUID passId = passInfo.getId();
+            transaction.setPassId(passId);
 
-        TransactionResponse response = mapToResponse(saved);
-        response.setSoldeApresOperation(passResponse.getData().getSolde());
-        return response;
+            // Recharge le solde
+            PassResponse passResponse = userServiceClient.rechargerSolde(
+                    request.getUserId(),
+                    new UpdateSoldeRequest(request.getMontant()),
+                    request.getUserId().toString(),
+                    INTERNAL_ROLE
+            );
+
+            transaction.setSoldeApres(passResponse.getSolde());
+            transaction.setStatus(TransactionStatus.SUCCESS);
+            Transaction saved = transactionRepository.save(transaction);
+
+            TransactionResponse response = mapToResponse(saved);
+            response.setSoldeApresOperation(passResponse.getSolde());
+            return response;
+
+        } catch (Exception e) {
+            log.error("Recharge échouée pour userId={} : {}", request.getUserId(), e.getMessage());
+            transaction.setStatus(TransactionStatus.FAILED);
+            transaction.setDescription("ÉCHEC RECHARGE - " + e.getMessage());
+            transaction.setSoldeApres(BigDecimal.ZERO);
+            transactionRepository.save(transaction);
+            throw new IllegalArgumentException("Recharge impossible : " + e.getMessage());
+        }
     }
 
-    // ── Historique complet ────────────────────────────────────────────────────
+    // ── Total des débits du jour pour un pass (appelé par pricing-service) ────
+
     @Transactional(readOnly = true)
-    public List<TransactionResponse> obtenirHistorique(Long userId) {
+    public BigDecimal getDailyTotal(UUID passId) {
+        LocalDateTime debutJour = LocalDate.now().atStartOfDay();
+        BigDecimal total = transactionRepository.sumDebitsJourByPassId(passId, debutJour);
+        return total != null ? total : BigDecimal.ZERO;
+    }
+
+    // ── Historique complet d'un utilisateur ───────────────────────────────────
+
+    @Transactional(readOnly = true)
+    public List<TransactionResponse> obtenirHistorique(UUID userId) {
         return transactionRepository.findByUserIdOrderByCreatedAtDesc(userId)
                 .stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }
 
-    // ── Historique débits uniquement ──────────────────────────────────────────
-    @Transactional(readOnly = true)
-    public List<TransactionResponse> obtenirHistoriqueDebits(Long userId) {
-        return transactionRepository
-                .findByUserIdAndTypeOrderByCreatedAtDesc(userId, TransactionType.DEBIT)
-                .stream()
-                .map(this::mapToResponse)
-                .collect(Collectors.toList());
-    }
-
     // ── Détail d'une transaction ──────────────────────────────────────────────
+
     @Transactional(readOnly = true)
-    public TransactionResponse obtenirTransaction(Long transactionId) {
+    public TransactionResponse obtenirTransaction(UUID transactionId) {
         Transaction transaction = transactionRepository.findById(transactionId)
                 .orElseThrow(() -> new TransactionNotFoundException(transactionId));
         return mapToResponse(transaction);
     }
 
-    // ── Mapper ────────────────────────────────────────────────────────────────
-    private TransactionResponse mapToResponse(Transaction t) {
-        TransactionResponse response = new TransactionResponse();
-        response.setId(t.getId());
-        response.setUserId(t.getUserId());
-        response.setTripId(t.getTripId());
-        response.setMontant(t.getMontant());
-        response.setType(t.getType());
-        response.setStatus(t.getStatus());
-        response.setDescription(t.getDescription());
-        response.setCreatedAt(t.getCreatedAt());
-        return response;
-    }
+    // ── Stats du jour (ADMIN) ─────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
     public Map<String, Object> obtenirStatsJour() {
@@ -166,13 +189,28 @@ public class BillingService {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         return Map.of(
-                "date",          LocalDate.now().toString(),
-                "totalDebits",   totalDebits,
-                "totalCredits",  totalCredits,
+                "date",           LocalDate.now().toString(),
+                "totalDebits",    totalDebits,
+                "totalCredits",   totalCredits,
                 "nbTransactions", duJour.size(),
-                "nbEchecs",      duJour.stream()
+                "nbEchecs",       duJour.stream()
                         .filter(t -> t.getStatus() == TransactionStatus.FAILED)
                         .count()
         );
+    }
+
+    // ── Mapper ────────────────────────────────────────────────────────────────
+
+    private TransactionResponse mapToResponse(Transaction t) {
+        TransactionResponse response = new TransactionResponse();
+        response.setId(t.getId());
+        response.setUserId(t.getUserId());
+        response.setTripId(t.getTripId());
+        response.setMontant(t.getMontant());
+        response.setType(t.getType());
+        response.setStatus(t.getStatus());
+        response.setDescription(t.getDescription());
+        response.setCreatedAt(t.getCreatedAt());
+        return response;
     }
 }

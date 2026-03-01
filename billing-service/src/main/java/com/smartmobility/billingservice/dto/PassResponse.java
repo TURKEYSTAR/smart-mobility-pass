@@ -1,11 +1,13 @@
 package com.smartmobility.billingservice.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.smartmobility.billingservice.entity.PassStatus;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class PassResponse {
 
     private UUID id;
@@ -14,16 +16,13 @@ public class PassResponse {
     private BigDecimal solde;
     private LocalDateTime createdAt;
     private LocalDateTime expirationDate;
-
-    // userId utile pour les appels inter-services
     private UUID userId;
 
-    // Champ calculé : indique si le pass est expiré au moment de la réponse
-    public boolean isExpired() {
-        return expirationDate != null && expirationDate.isBefore(LocalDateTime.now());
+    public PassResponse() {
     }
 
-    public PassResponse() {
+    public boolean isExpired() {
+        return expirationDate != null && expirationDate.isBefore(LocalDateTime.now());
     }
 
     public UUID getId() {

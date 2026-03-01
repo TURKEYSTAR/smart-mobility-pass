@@ -10,7 +10,7 @@
         <module name="api-gateway" />
         <module name="auth-service" />
       </profile>
-      <profile name="Annotation profile for pricing-service" enabled="true">
+      <profile name="Annotation profile for notification-service" enabled="true">
         <sourceOutputDir name="target/generated-sources/annotations" />
         <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
         <outputRelativeToContentRoot value="true" />
@@ -21,8 +21,8 @@
         <module name="trip-service" />
         <module name="spring-cloud-server-config" />
         <module name="user-service" />
-        <module name="pricing-service" />
         <module name="notification-service" />
+        <module name="pricing-service" />
         <module name="billing-service" />
       </profile>
     </annotationProcessing>

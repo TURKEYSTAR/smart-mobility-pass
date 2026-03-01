@@ -24,9 +24,10 @@ public interface TripRepository extends JpaRepository<Trip, UUID> {
 
     long countByUserIdAndStatus(UUID userId, TripStatus status);
 
+    // ⚠️ Hibernate 7 : enum en HQL doit être qualifié avec FQCN
     @Query("SELECT t FROM Trip t WHERE t.passId = :passId " +
-           "AND t.status = 'COMPLETED' " +
-           "AND t.createdAt >= :startOfDay")
+            "AND t.status = com.smartmobility.tripservice.entity.TripStatus.COMPLETED " +
+            "AND t.createdAt >= :startOfDay")
     List<Trip> findTodayCompletedTripsByPassId(
             @Param("passId") UUID passId,
             @Param("startOfDay") LocalDateTime startOfDay

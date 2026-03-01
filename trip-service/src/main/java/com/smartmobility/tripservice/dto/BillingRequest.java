@@ -14,7 +14,7 @@ import java.util.UUID;
 @Builder
 public class BillingRequest {
 
-    private UUID userID;
+    private UUID userId;
     private UUID tripId;
     private BigDecimal montant;
     private String description;

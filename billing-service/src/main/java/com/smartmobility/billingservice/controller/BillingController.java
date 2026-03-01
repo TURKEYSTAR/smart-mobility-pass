@@ -8,8 +8,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/billing")
@@ -21,7 +23,10 @@ public class BillingController {
         this.billingService = billingService;
     }
 
-    // POST /api/billing/debit — trip-service uniquement via X-Internal-Service
+    /**
+     * POST /api/billing/debit
+     * Réservé au trip-service (header X-Internal-Service requis).
+     */
     @PostMapping("/debit")
     public ResponseEntity<?> debiter(
             @RequestBody DebitRequest request,
@@ -40,14 +45,17 @@ public class BillingController {
         }
     }
 
-    // POST /api/billing/recharge — son propre pass OU ADMIN
+    /**
+     * POST /api/billing/recharge
+     * Accessible au propriétaire du pass OU à un ADMIN.
+     */
     @PostMapping("/recharge")
     public ResponseEntity<?> recharger(
             @RequestBody RechargeRequest request,
             @RequestHeader("X-User-Id")   String userId,
             @RequestHeader("X-User-Role") String userRole) {
 
-        boolean estProprietaire = String.valueOf(request.getUserId()).equals(userId);
+        boolean estProprietaire = request.getUserId().toString().equals(userId);
         boolean estAdmin        = "ADMIN".equalsIgnoreCase(userRole);
 
         if (!estProprietaire && !estAdmin) {
@@ -63,14 +71,17 @@ public class BillingController {
         }
     }
 
-    // GET /api/billing/history/{userId} — son propre historique OU ADMIN
+    /**
+     * GET /api/billing/history/{userId}
+     * Historique des transactions — propriétaire OU ADMIN.
+     */
     @GetMapping("/history/{userId}")
     public ResponseEntity<?> obtenirHistorique(
-            @PathVariable Long userId,
+            @PathVariable UUID userId,
             @RequestHeader("X-User-Id")   String currentUserId,
             @RequestHeader("X-User-Role") String userRole) {
 
-        boolean estProprietaire = String.valueOf(userId).equals(currentUserId);
+        boolean estProprietaire = userId.toString().equals(currentUserId);
         boolean estAdmin        = "ADMIN".equalsIgnoreCase(userRole);
 
         if (!estProprietaire && !estAdmin) {
@@ -79,17 +90,20 @@ public class BillingController {
         return ResponseEntity.ok(billingService.obtenirHistorique(userId));
     }
 
-    // GET /api/billing/transaction/{id} — sa propre transaction OU ADMIN
+    /**
+     * GET /api/billing/transaction/{id}
+     * Détail d'une transaction — propriétaire OU ADMIN.
+     */
     @GetMapping("/transaction/{id}")
     public ResponseEntity<?> obtenirTransaction(
-            @PathVariable Long id,
+            @PathVariable UUID id,
             @RequestHeader("X-User-Id")   String userId,
             @RequestHeader("X-User-Role") String userRole) {
 
         try {
             TransactionResponse transaction = billingService.obtenirTransaction(id);
 
-            boolean estProprietaire = String.valueOf(transaction.getUserId()).equals(userId);
+            boolean estProprietaire = transaction.getUserId().toString().equals(userId);
             boolean estAdmin        = "ADMIN".equalsIgnoreCase(userRole);
 
             if (!estProprietaire && !estAdmin) {
@@ -101,6 +115,10 @@ public class BillingController {
         }
     }
 
+    /**
+     * GET /api/billing/stats
+     * Stats du jour — ADMIN uniquement.
+     */
     @GetMapping("/stats")
     public ResponseEntity<?> obtenirStats(
             @RequestHeader("X-User-Role") String userRole) {
@@ -109,5 +127,16 @@ public class BillingController {
             return ResponseEntity.status(403).body(Map.of("error", "Accès refusé"));
         }
         return ResponseEntity.ok(billingService.obtenirStatsJour());
+    }
+
+    /**
+     * GET /api/billing/daily-total/{passId}
+     * Total des débits du jour pour un pass.
+     * Appelé par le pricing-service pour vérifier le plafond journalier (2000 FCFA).
+     * Endpoint interne — pas de vérification JWT (appelé service-à-service).
+     */
+    @GetMapping("/daily-total/{passId}")
+    public ResponseEntity<BigDecimal> getDailyTotal(@PathVariable UUID passId) {
+        return ResponseEntity.ok(billingService.getDailyTotal(passId));
     }
 }
