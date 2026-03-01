@@ -3,6 +3,7 @@ package com.smartmobility.tripservice.client;
 import com.smartmobility.tripservice.dto.FareResultDTO;
 import com.smartmobility.tripservice.dto.PricingRequest;
 import com.smartmobility.tripservice.entity.TransportType;
+import com.smartmobility.tripservice.messaging.TripEventPublisher;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -12,17 +13,13 @@ import java.math.BigDecimal;
 import java.util.Collections;
 import java.util.Map;
 
-/**
- * PricingClientWrapper — Circuit Breaker dans un bean séparé.
- * ⚠️ @CircuitBreaker ne fonctionne pas en self-invocation (même classe).
- *    Ce wrapper est injecté dans TripService pour que Spring AOP puisse l'intercepter.
- */
 @Component
 @RequiredArgsConstructor
 @Slf4j
 public class PricingClientWrapper {
 
     private final PricingServiceClient pricingServiceClient;
+    private final TripEventPublisher eventPublisher;  // ✅ injecté
 
     private static final Map<TransportType, BigDecimal> FALLBACK_FARES = Map.of(
             TransportType.BUS_CLASSIQUE, BigDecimal.valueOf(200),
@@ -43,6 +40,19 @@ public class PricingClientWrapper {
         );
 
         log.warn("[PricingWrapper] Fallback : {} FCFA pour {}", fallbackAmount, request.getTransportType());
+
+        //Publier la notification PRICING_FALLBACK
+        try {
+            eventPublisher.publishPricingFallback(
+                    request.getTripId(),
+                    request.getPassId(),
+                    t.getMessage(),
+                    fallbackAmount,
+                    TransportType.valueOf(request.getTransportType().name())
+            );
+        } catch (Exception e) {
+            log.warn("[PricingWrapper] RabbitMQ indisponible, PRICING_FALLBACK non publié : {}", e.getMessage());
+        }
 
         return FareResultDTO.builder()
                 .baseAmount(fallbackAmount)

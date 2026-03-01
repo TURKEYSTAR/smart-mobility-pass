@@ -8,8 +8,10 @@ import com.smartmobility.userservice.entity.User;
 import com.smartmobility.userservice.exception.PassSuspenduException;
 import com.smartmobility.userservice.exception.SoldeInsuffisantException;
 import com.smartmobility.userservice.exception.UserNotFoundException;
+import com.smartmobility.userservice.messaging.PassEventPublisher;
 import com.smartmobility.userservice.repository.MobilityPassRepository;
 import com.smartmobility.userservice.repository.UserRepository;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,20 +21,23 @@ import java.util.UUID;
 
 @Service
 @Transactional
+@Slf4j
 public class PassMobilityService {
 
     private static final int DUREE_VALIDITE_MOIS = 12;
 
     private final MobilityPassRepository passRepository;
     private final UserRepository userRepository;
+    private final PassEventPublisher passEventPublisher; // ✅ injecté
 
     public PassMobilityService(MobilityPassRepository passRepository,
-                               UserRepository userRepository) {
+                               UserRepository userRepository,
+                               PassEventPublisher passEventPublisher) {
         this.passRepository = passRepository;
         this.userRepository = userRepository;
+        this.passEventPublisher = passEventPublisher;
     }
 
-    // ── Créer le pass automatiquement à la création du compte ────────────────
     public void creerPassAutomatique(User user) {
         MobilityPass pass = new MobilityPass();
         pass.setPassNumber(genererPassNumber());
@@ -46,7 +51,6 @@ public class PassMobilityService {
         userRepository.save(user);
     }
 
-    // ── Consulter le pass (USER voit le sien, ADMIN voit tous) ───────────────
     @Transactional(readOnly = true)
     public PassResponse obtenirPass(UUID userId) {
         User user = userRepository.findById(userId)
@@ -74,6 +78,21 @@ public class PassMobilityService {
 
         pass.setStatus(PassStatus.SUSPENDU);
         passRepository.save(pass);
+
+        // ✅ Publier l'événement de suspension
+        try {
+            passEventPublisher.publishPassSuspended(
+                    userId,
+                    pass.getId(),
+                    pass.getPassNumber(),
+                    pass.getSolde()
+            );
+        } catch (Exception e) {
+            // RabbitMQ optionnel — ne doit pas faire échouer la suspension
+            log.warn("[PassMobilityService] RabbitMQ indisponible, PASS_SUSPENDED non publié : {}",
+                    e.getMessage());
+        }
+
         return mapToPassResponse(pass, userId);
     }
 
@@ -110,7 +129,7 @@ public class PassMobilityService {
         return mapToPassResponse(pass, userId);
     }
 
-    // ── Débiter le solde — appelé par billing-service (rôle ADMIN dans header) ──
+    // ── Débiter le solde ──────────────────────────────────────────────────────
     public PassResponse debiterSolde(UUID userId, UpdateSoldeRequest request) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException(userId));
@@ -138,16 +157,93 @@ public class PassMobilityService {
         return mapToPassResponse(pass, userId);
     }
 
-    // ── Recharger le solde — USER (son propre) ou ADMIN ──────────────────────
+    // ── Recharger le solde ────────────────────────────────────────────────────
     public PassResponse rechargerSolde(UUID userId, UpdateSoldeRequest request) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException(userId));
 
         MobilityPass pass = user.getMobilityPass();
+        verifierEtMettreAJourExpiration(pass);
+
+        // ✅ Bloquer la recharge si le pass est suspendu
+        if (pass.getStatus() == PassStatus.SUSPENDU) {
+            throw new IllegalArgumentException(
+                    "Impossible de recharger un pass suspendu. Contactez un administrateur.");
+        }
+        if (pass.getStatus() == PassStatus.EXPIRE) {
+            throw new IllegalArgumentException(
+                    "Impossible de recharger un pass expiré. Veuillez d'abord le renouveler.");
+        }
+
         pass.setSolde(pass.getSolde().add(request.getMontant()));
         passRepository.save(pass);
         return mapToPassResponse(pass, userId);
     }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     // ── Utilitaires internes ──────────────────────────────────────────────────
 

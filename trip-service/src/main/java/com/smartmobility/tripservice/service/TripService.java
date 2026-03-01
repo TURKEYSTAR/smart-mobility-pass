@@ -28,11 +28,11 @@ public class TripService {
 
     private final TripRepository tripRepository;
     private final UserServiceClient userServiceClient;
-    private final PricingClientWrapper pricingClientWrapper;   // ← wrapper avec CB
+    private final PricingClientWrapper pricingClientWrapper;
     private final BillingServiceClient billingServiceClient;
     private final TripEventPublisher eventPublisher;
 
-    private static final BigDecimal MINIMUM_BALANCE    = BigDecimal.valueOf(100);
+    private static final BigDecimal MINIMUM_BALANCE       = BigDecimal.valueOf(100);
     private static final BigDecimal LOW_BALANCE_THRESHOLD = BigDecimal.valueOf(500);
 
     // ================================================================
@@ -100,6 +100,20 @@ public class TripService {
         }
 
         if (passInfo.getBalance() == null || passInfo.getBalance().compareTo(MINIMUM_BALANCE) < 0) {
+            // ✅ Publier la notification solde insuffisant AVANT de lever l'exception
+            try {
+                eventPublisher.publishInsufficientBalance(
+                        userId,
+                        passInfo.getPassId(),
+                        passInfo.getBalance()
+                );
+                log.warn("[TripService] ⚠️ Solde insuffisant notifié - userId={}, solde={} FCFA",
+                        userId, passInfo.getBalance());
+            } catch (Exception e) {
+                log.warn("[TripService] RabbitMQ indisponible, notification solde insuffisant non publiée : {}",
+                        e.getMessage());
+            }
+
             throw new InsufficientBalanceException(
                     "Solde insuffisant : " + passInfo.getBalance()
                             + " FCFA. Minimum requis : " + MINIMUM_BALANCE + " FCFA."
@@ -115,7 +129,6 @@ public class TripService {
     // ================================================================
 
     private Trip createTrip(TripRequest request, UUID userId, UUID passId) {
-        // passId depuis user-service si request.getPassId() non fourni
         UUID resolvedPassId = request.getPassId() != null ? request.getPassId() : passId;
 
         Trip trip = Trip.builder()
@@ -171,7 +184,6 @@ public class TripService {
                 log.warn("[TripService] ⚠️ Solde faible : {} FCFA", billing.getBalanceAfter());
             }
         } catch (Exception e) {
-            // RabbitMQ optionnel — ne doit pas faire échouer le trajet
             log.warn("[TripService] RabbitMQ indisponible, événement non publié : {}", e.getMessage());
         }
     }

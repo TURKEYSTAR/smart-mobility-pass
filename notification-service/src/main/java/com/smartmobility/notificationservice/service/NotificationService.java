@@ -2,8 +2,7 @@ package com.smartmobility.notificationservice.service;
 
 import com.smartmobility.notificationservice.entity.Notification;
 import com.smartmobility.notificationservice.entity.NotificationType;
-import com.smartmobility.notificationservice.messaging.PricingFallbackEvent;
-import com.smartmobility.notificationservice.messaging.TripCompletedEvent;
+import com.smartmobility.notificationservice.messaging.*;
 import com.smartmobility.notificationservice.repository.NotificationRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,9 +27,6 @@ public class NotificationService {
 
     @Transactional
     public void handleTripCompleted(TripCompletedEvent event) {
-        log.info("[NotificationService] 📨 TripCompleted - userId={}, montant={} FCFA, solde={} FCFA",
-                event.getUserId(), event.getAmount(), event.getBalanceAfter());
-
         String message = String.format(
                 "Trajet %s complété ✅ | Montant débité : %.0f FCFA | Solde restant : %.0f FCFA",
                 event.getTransportType(), event.getAmount(), event.getBalanceAfter());
@@ -40,7 +36,6 @@ public class NotificationService {
                 .type(NotificationType.TRIP_COMPLETED).message(message)
                 .amount(event.getAmount()).balanceAfter(event.getBalanceAfter())
                 .build());
-        log.info("[NotificationService] ✅ TRIP_COMPLETED sauvegardée");
 
         if (event.getBalanceAfter() != null && event.getBalanceAfter().compareTo(seuilSoldeFaible) < 0) {
             handleLowBalance(event);
@@ -49,19 +44,50 @@ public class NotificationService {
 
     @Transactional
     public void handlePricingFallback(PricingFallbackEvent event) {
-        log.warn("[NotificationService] ⚡ PricingFallback - tripId={}, passId={}", event.getTripId(), event.getPassId());
-
         String message = String.format(
                 "⚠️ Tarif standard appliqué pour votre trajet %s (%.0f FCFA) — service tarifaire temporairement indisponible.",
                 event.getTransportType(), event.getUsedFallbackAmount());
 
-        // userId absent de l'event fallback → on utilise passId comme proxy
         notificationRepository.save(Notification.builder()
                 .userId(event.getPassId()).passId(event.getPassId()).tripId(event.getTripId())
                 .type(NotificationType.PRICING_FALLBACK).message(message)
                 .amount(event.getUsedFallbackAmount())
                 .build());
-        log.info("[NotificationService] ✅ PRICING_FALLBACK sauvegardée");
+    }
+
+    @Transactional
+    public void handleInsufficientBalance(InsufficientBalanceEvent event) {
+        String message = String.format(
+                "❌ Trajet refusé — Solde insuffisant. Solde actuel : %.0f FCFA. " +
+                        "Rechargez votre Mobility Pass pour continuer à voyager.",
+                event.getCurrentBalance() != null ? event.getCurrentBalance() : BigDecimal.ZERO);
+
+        notificationRepository.save(Notification.builder()
+                .userId(event.getUserId()).passId(event.getPassId())
+                .type(NotificationType.INSUFFICIENT_BALANCE).message(message)
+                .balanceAfter(event.getCurrentBalance())
+                .build());
+    }
+
+    // ✅ NOUVEAU
+    @Transactional
+    public void handlePassSuspended(PassSuspendedEvent event) {
+        String message = String.format(
+                "⛔ Votre Mobility Pass %s a été suspendu par un administrateur. " +
+                        "Solde actuel : %.0f FCFA. Contactez le support pour plus d'informations.",
+                event.getPassNumber(),
+                event.getCurrentBalance() != null ? event.getCurrentBalance() : BigDecimal.ZERO);
+
+        notificationRepository.save(Notification.builder()
+                .userId(event.getUserId())
+                .passId(event.getPassId())
+                .type(NotificationType.PASS_SUSPENDED)
+                .message(message)
+                .balanceAfter(event.getCurrentBalance())
+                .build());
+
+        log.warn("[NotificationService] ⛔ PASS_SUSPENDED sauvegardée - userId={}, pass={}",
+                event.getUserId(), event.getPassNumber());
     }
 
     private void handleLowBalance(TripCompletedEvent event) {
@@ -74,7 +100,6 @@ public class NotificationService {
                 .type(NotificationType.LOW_BALANCE).message(message)
                 .balanceAfter(event.getBalanceAfter())
                 .build());
-        log.warn("[NotificationService] ⚠️ LOW_BALANCE - userId={}, solde={} FCFA", event.getUserId(), event.getBalanceAfter());
     }
 
     public List<Notification> getNotificationsByUserId(UUID userId) {
@@ -102,6 +127,5 @@ public class NotificationService {
         List<Notification> unread = notificationRepository.findByUserIdAndReadFalseOrderByCreatedAtDesc(userId);
         unread.forEach(n -> n.setRead(true));
         notificationRepository.saveAll(unread);
-        log.info("[NotificationService] {} notifications lues - userId={}", unread.size(), userId);
     }
 }

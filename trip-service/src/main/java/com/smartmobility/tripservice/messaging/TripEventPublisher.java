@@ -19,18 +19,20 @@ public class TripEventPublisher {
     private final RabbitTemplate rabbitTemplate;
 
     @Value("${rabbitmq.exchange.name}")
-    private String exchangeName;
+    private String exchange;
 
     @Value("${rabbitmq.routing-key.trip-completed}")
-    private String tripCompletedRoutingKey;
+    private String tripCompletedKey;
 
     @Value("${rabbitmq.routing-key.pricing-fallback}")
-    private String pricingFallbackRoutingKey;
+    private String pricingFallbackKey;
+
+    @Value("${rabbitmq.routing-key.insufficient-balance}")
+    private String insufficientBalanceKey;
 
     public void publishTripCompleted(UUID tripId, UUID userId, UUID passId,
                                      BigDecimal amount, BigDecimal balanceAfter,
                                      TransportType transportType) {
-
         TripCompletedEvent event = TripCompletedEvent.builder()
                 .tripId(tripId)
                 .userId(userId)
@@ -41,28 +43,36 @@ public class TripEventPublisher {
                 .completedAt(LocalDateTime.now())
                 .build();
 
-        log.info("[RabbitMQ] Publish TRIP_COMPLETED → tripId={}, montant={} FCFA, solde après={} FCFA",
-                tripId, amount, balanceAfter);
-
-        rabbitTemplate.convertAndSend(exchangeName, tripCompletedRoutingKey, event);
+        rabbitTemplate.convertAndSend(exchange, tripCompletedKey, event);
+        log.info("[TripEventPublisher] ✅ TRIP_COMPLETED publié - tripId={}", tripId);
     }
 
-    public void publishPricingFallbackUsed(UUID tripId, UUID passId,
-                                           BigDecimal fallbackAmount,
-                                           TransportType transportType) {
-
+    public void publishPricingFallback(UUID tripId, UUID passId, String reason,
+                                       BigDecimal fallbackAmount, TransportType transportType) {
         PricingFallbackEvent event = PricingFallbackEvent.builder()
                 .tripId(tripId)
                 .passId(passId)
-                .reason("PricingServiceDown")
+                .reason(reason)
                 .usedFallbackAmount(fallbackAmount)
                 .transportType(transportType)
                 .occurredAt(LocalDateTime.now())
                 .build();
 
-        log.warn("[RabbitMQ] Publish PRICING_FALLBACK_USED → tripId={}, fallback={} FCFA, type={}",
-                tripId, fallbackAmount, transportType);
+        rabbitTemplate.convertAndSend(exchange, pricingFallbackKey, event);
+        log.warn("[TripEventPublisher] ⚡ PRICING_FALLBACK publié - tripId={}", tripId);
+    }
 
-        rabbitTemplate.convertAndSend(exchangeName, pricingFallbackRoutingKey, event);
+    // ✅ NOUVEAU : notification solde insuffisant
+    public void publishInsufficientBalance(UUID userId, UUID passId, BigDecimal currentBalance) {
+        InsufficientBalanceEvent event = InsufficientBalanceEvent.builder()
+                .userId(userId)
+                .passId(passId)
+                .currentBalance(currentBalance)
+                .occurredAt(LocalDateTime.now())
+                .build();
+
+        rabbitTemplate.convertAndSend(exchange, insufficientBalanceKey, event);
+        log.warn("[TripEventPublisher] ⚠️ INSUFFICIENT_BALANCE publié - userId={}, solde={} FCFA",
+                userId, currentBalance);
     }
 }
