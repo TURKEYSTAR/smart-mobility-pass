@@ -13,7 +13,9 @@ import com.smartmobility.userservice.repository.UserRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 @Service
 @Transactional
@@ -24,39 +26,38 @@ public class PassMobilityService {
     private final MobilityPassRepository passRepository;
     private final UserRepository userRepository;
 
-    public PassMobilityService(MobilityPassRepository passRepository, UserRepository userRepository) {
+    public PassMobilityService(MobilityPassRepository passRepository,
+                               UserRepository userRepository) {
         this.passRepository = passRepository;
         this.userRepository = userRepository;
     }
 
+    // ── Créer le pass automatiquement à la création du compte ────────────────
     public void creerPassAutomatique(User user) {
-        // 1. Créer le nouveau Pass
         MobilityPass pass = new MobilityPass();
-        pass.setSolde(0.0);
+        pass.setPassNumber(genererPassNumber());
+        pass.setSolde(BigDecimal.ZERO);
         pass.setStatus(PassStatus.ACTIVE);
         pass.setCreatedAt(LocalDateTime.now());
-        // Optionnel : ajouter une date d'expiration (ex: dans 1 an)
-        pass.setExpirationDate(LocalDateTime.now().plusYears(1));
+        pass.setExpirationDate(LocalDateTime.now().plusMonths(DUREE_VALIDITE_MOIS));
 
-        // 2. Sauvegarder le Pass
         MobilityPass savedPass = passRepository.save(pass);
-
-        // 3. Lier le Pass à l'utilisateur
         user.setMobilityPass(savedPass);
         userRepository.save(user);
     }
 
-    // ── Consulter le pass ─────────────────────────────────────────────────────
+    // ── Consulter le pass (USER voit le sien, ADMIN voit tous) ───────────────
     @Transactional(readOnly = true)
-    public PassResponse obtenirPass(Long userId) {
+    public PassResponse obtenirPass(UUID userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException(userId));
-        verifierEtMettreAJourExpiration(user.getMobilityPass());
-        return mapToPassResponse(user.getMobilityPass(), userId);
+        MobilityPass pass = user.getMobilityPass();
+        verifierEtMettreAJourExpiration(pass);
+        return mapToPassResponse(pass, userId);
     }
 
-    // ── Suspendre le pass ─────────────────────────────────────────────────────
-    public PassResponse suspendrePass(Long userId) {
+    // ── Suspendre le pass — ADMIN uniquement ─────────────────────────────────
+    public PassResponse suspendrePass(UUID userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException(userId));
 
@@ -65,16 +66,19 @@ public class PassMobilityService {
 
         if (pass.getStatus() == PassStatus.EXPIRE) {
             throw new IllegalArgumentException(
-                    "Impossible de suspendre un pass expiré. Veuillez le renouveler.");
+                    "Impossible de suspendre un pass expiré. Veuillez d'abord le renouveler.");
+        }
+        if (pass.getStatus() == PassStatus.SUSPENDU) {
+            throw new IllegalArgumentException("Le pass est déjà suspendu.");
         }
 
         pass.setStatus(PassStatus.SUSPENDU);
-        userRepository.save(user);
+        passRepository.save(pass);
         return mapToPassResponse(pass, userId);
     }
 
-    // ── Réactiver le pass ─────────────────────────────────────────────────────
-    public PassResponse activerPass(Long userId) {
+    // ── Réactiver le pass — ADMIN uniquement ─────────────────────────────────
+    public PassResponse activerPass(UUID userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException(userId));
 
@@ -83,28 +87,31 @@ public class PassMobilityService {
 
         if (pass.getStatus() == PassStatus.EXPIRE) {
             throw new IllegalArgumentException(
-                    "Impossible de réactiver un pass expiré. Veuillez le renouveler.");
+                    "Impossible de réactiver un pass expiré. Veuillez d'abord le renouveler.");
+        }
+        if (pass.getStatus() == PassStatus.ACTIVE) {
+            throw new IllegalArgumentException("Le pass est déjà actif.");
         }
 
         pass.setStatus(PassStatus.ACTIVE);
-        userRepository.save(user);
+        passRepository.save(pass);
         return mapToPassResponse(pass, userId);
     }
 
-    // ── Renouveler le pass ────────────────────────────────────────────────────
-    public PassResponse renouvellerPass(Long userId) {
+    // ── Renouveler le pass — USER (son propre) ou ADMIN ──────────────────────
+    public PassResponse renouvellerPass(UUID userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException(userId));
 
         MobilityPass pass = user.getMobilityPass();
         pass.setExpirationDate(LocalDateTime.now().plusMonths(DUREE_VALIDITE_MOIS));
         pass.setStatus(PassStatus.ACTIVE);
-        userRepository.save(user);
+        passRepository.save(pass);
         return mapToPassResponse(pass, userId);
     }
 
-    // ── Débiter le solde ──────────────────────────────────────────────────────
-    public PassResponse debiterSolde(Long userId, UpdateSoldeRequest request) {
+    // ── Débiter le solde — appelé par billing-service (rôle ADMIN dans header) ──
+    public PassResponse debiterSolde(UUID userId, UpdateSoldeRequest request) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException(userId));
 
@@ -119,26 +126,26 @@ public class PassMobilityService {
                     "Le Mobility Pass " + pass.getPassNumber() + " est expiré.");
         }
 
-        Double soldeActuel = pass.getSolde();
-        Double montant     = request.getMontant();
+        BigDecimal soldeActuel = pass.getSolde();
+        BigDecimal montant     = request.getMontant();
 
         if (soldeActuel.compareTo(montant) < 0) {
             throw new SoldeInsuffisantException(soldeActuel, montant);
         }
 
-        pass.setSolde(soldeActuel - montant);
-        userRepository.save(user);
+        pass.setSolde(soldeActuel.subtract(montant));
+        passRepository.save(pass);
         return mapToPassResponse(pass, userId);
     }
 
-    // ── Recharger le solde ────────────────────────────────────────────────────
-    public PassResponse rechargerSolde(Long userId, UpdateSoldeRequest request) {
+    // ── Recharger le solde — USER (son propre) ou ADMIN ──────────────────────
+    public PassResponse rechargerSolde(UUID userId, UpdateSoldeRequest request) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException(userId));
 
         MobilityPass pass = user.getMobilityPass();
-        pass.setSolde(pass.getSolde() + request.getMontant());
-        userRepository.save(user);
+        pass.setSolde(pass.getSolde().add(request.getMontant()));
+        passRepository.save(pass);
         return mapToPassResponse(pass, userId);
     }
 
@@ -149,10 +156,11 @@ public class PassMobilityService {
                 && pass.getExpirationDate() != null
                 && LocalDateTime.now().isAfter(pass.getExpirationDate())) {
             pass.setStatus(PassStatus.EXPIRE);
+            passRepository.save(pass);
         }
     }
 
-    private PassResponse mapToPassResponse(MobilityPass pass, Long userId) {
+    private PassResponse mapToPassResponse(MobilityPass pass, UUID userId) {
         PassResponse response = new PassResponse();
         response.setId(pass.getId());
         response.setPassNumber(pass.getPassNumber());
@@ -162,5 +170,9 @@ public class PassMobilityService {
         response.setExpirationDate(pass.getExpirationDate());
         response.setUserId(userId);
         return response;
+    }
+
+    private String genererPassNumber() {
+        return "SMP-" + UUID.randomUUID().toString().toUpperCase().replace("-", "").substring(0, 8);
     }
 }

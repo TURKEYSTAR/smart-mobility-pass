@@ -2,25 +2,48 @@ package com.smartmobility.userservice.entity;
 
 import jakarta.persistence.*;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 @Entity
+@Table(name = "mobility_pass")
 public class MobilityPass {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
 
-    String passNumber; // généré (UUID ou format custom)
-    PassStatus status; // ACTIVE, SUSPENDED
-    Double solde;
-    LocalDateTime createdAt;
+    @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
+    private UUID id;
+
+    @Column(unique = true, nullable = false)
+    private String passNumber;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private PassStatus status;
+
+    // BigDecimal pour la précision financière (FCFA)
+    @Column(nullable = false, precision = 12, scale = 2)
+    private BigDecimal solde;
+
+    @Column(nullable = false)
+    private LocalDateTime createdAt;
 
     @Column(nullable = false)
     private LocalDateTime expirationDate;
 
-    @JoinColumn(name = "user_id")
-    @OneToOne
-    User user;
+    // Relation inverse — le User possède le côté propriétaire (@JoinColumn)
+    @OneToOne(mappedBy = "mobilityPass")
+    private User user;
+
+    // ── Getters / Setters ─────────────────────────────────────────────────────
+
+    public UUID getId() {
+        return id;
+    }
+
+    public void setId(UUID id) {
+        this.id = id;
+    }
 
     public String getPassNumber() {
         return passNumber;
@@ -38,11 +61,11 @@ public class MobilityPass {
         this.status = status;
     }
 
-    public Double getSolde() {
+    public BigDecimal getSolde() {
         return solde;
     }
 
-    public void setSolde(Double solde) {
+    public void setSolde(BigDecimal solde) {
         this.solde = solde;
     }
 
@@ -68,13 +91,5 @@ public class MobilityPass {
 
     public void setUser(User user) {
         this.user = user;
-    }
-
-    public void setId(Long id) {
-        this.id = id;
-    }
-
-    public Long getId() {
-        return id;
     }
 }

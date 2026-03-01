@@ -6,21 +6,18 @@ import com.smartmobility.userservice.service.PassMobilityService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.UUID;
+
 /**
- * PassMobilityController — gestion du Mobility Pass uniquement.
+ * PassMobilityController — gestion du Mobility Pass.
  *
- * Délègue à : PassMobilityService
+ * Rôles :
+ *   USER  → consulter son pass, recharger son pass, renouveler son pass
+ *   ADMIN → suspendre, réactiver, voir tous les pass (via userId)
  *
- * Endpoints :
- *   GET /api/users/{id}/pass              → consulter le pass et le solde
- *   PUT /api/users/{id}/pass/suspendre    → suspendre   (MANAGER / ADMIN)
- *   PUT /api/users/{id}/pass/activer      → réactiver   (MANAGER / ADMIN)
- *   PUT /api/users/{id}/pass/renouveler   → renouveler  (propriétaire ou MANAGER/ADMIN)
- *   PUT /api/users/{id}/pass/debiter      → débiter     (MANAGER / ADMIN / billing-service)
- *   PUT /api/users/{id}/pass/recharger    → recharger   (propriétaire ou MANAGER/ADMIN)
+ * Le débit est appelé exclusivement par billing-service (interne, rôle ADMIN).
  *
- * Sécurité assurée par la Gateway → headers X-User-Id / X-User-Role injectés.
- * Pas de Spring Security ici.
+ * Sécurité : Gateway injecte X-User-Id (UUID) et X-User-Role.
  */
 @RestController
 @RequestMapping("/api/users/{id}/pass")
@@ -32,23 +29,23 @@ public class PassMobilityController {
         this.passMobilityService = passMobilityService;
     }
 
-    // GET /api/users/{id}/pass — son propre pass OU ADMIN
+    // GET /api/users/{id}/pass — consulter son solde (USER son propre, ADMIN tous)
     @GetMapping
     public ResponseEntity<?> obtenirPass(
-            @PathVariable Long id,
-            @RequestHeader("X-User-Id")   String userId,
+            @PathVariable UUID id,
+            @RequestHeader("X-User-Id")   String currentUserId,
             @RequestHeader("X-User-Role") String userRole) {
 
-        if (!isOwnerOrAdmin(id, userId, userRole)) {
+        if (!isOwnerOrAdmin(id, currentUserId, userRole)) {
             return ResponseEntity.status(403).body("Accès refusé");
         }
         return ResponseEntity.ok(passMobilityService.obtenirPass(id));
     }
 
-    // PUT /pass/suspendre — ADMIN uniquement
+    // PUT /pass/suspendre — ADMIN uniquement (dashboard)
     @PutMapping("/suspendre")
     public ResponseEntity<?> suspendrePass(
-            @PathVariable Long id,
+            @PathVariable UUID id,
             @RequestHeader("X-User-Role") String userRole) {
 
         if (!isAdmin(userRole)) {
@@ -57,10 +54,10 @@ public class PassMobilityController {
         return ResponseEntity.ok(passMobilityService.suspendrePass(id));
     }
 
-    // PUT /pass/activer — ADMIN uniquement
+    // PUT /pass/activer — ADMIN uniquement (dashboard)
     @PutMapping("/activer")
     public ResponseEntity<?> activerPass(
-            @PathVariable Long id,
+            @PathVariable UUID id,
             @RequestHeader("X-User-Role") String userRole) {
 
         if (!isAdmin(userRole)) {
@@ -69,24 +66,23 @@ public class PassMobilityController {
         return ResponseEntity.ok(passMobilityService.activerPass(id));
     }
 
-    // PUT /pass/renouveler — son propre pass OU ADMIN
+    // PUT /pass/renouveler — USER (son propre) ou ADMIN
     @PutMapping("/renouveler")
     public ResponseEntity<?> renouvellerPass(
-            @PathVariable Long id,
-            @RequestHeader("X-User-Id")   String userId,
+            @PathVariable UUID id,
+            @RequestHeader("X-User-Id")   String currentUserId,
             @RequestHeader("X-User-Role") String userRole) {
 
-        if (!isOwnerOrAdmin(id, userId, userRole)) {
+        if (!isOwnerOrAdmin(id, currentUserId, userRole)) {
             return ResponseEntity.status(403).body("Accès refusé");
         }
         return ResponseEntity.ok(passMobilityService.renouvellerPass(id));
     }
 
-    // PUT /pass/debiter — appelé UNIQUEMENT par billing-service (interne)
-    // billing-service envoie X-User-Role: ADMIN
+    // PUT /pass/debiter — billing-service uniquement (envoie X-User-Role: ADMIN)
     @PutMapping("/debiter")
     public ResponseEntity<?> debiterSolde(
-            @PathVariable Long id,
+            @PathVariable UUID id,
             @RequestHeader("X-User-Role") String userRole,
             @RequestBody UpdateSoldeRequest request) {
 
@@ -96,23 +92,28 @@ public class PassMobilityController {
         return ResponseEntity.ok(passMobilityService.debiterSolde(id, request));
     }
 
-    // PUT /pass/recharger — son propre pass OU ADMIN
+    // PUT /pass/recharger — USER (son propre) ou ADMIN
     @PutMapping("/recharger")
     public ResponseEntity<?> rechargerSolde(
-            @PathVariable Long id,
-            @RequestHeader("X-User-Id")   String userId,
+            @PathVariable UUID id,
+            @RequestHeader("X-User-Id")   String currentUserId,
             @RequestHeader("X-User-Role") String userRole,
             @RequestBody UpdateSoldeRequest request) {
 
-        if (!isOwnerOrAdmin(id, userId, userRole)) {
+        if (!isOwnerOrAdmin(id, currentUserId, userRole)) {
             return ResponseEntity.status(403).body("Accès refusé");
         }
         return ResponseEntity.ok(passMobilityService.rechargerSolde(id, request));
     }
 
     // ── Utilitaires ───────────────────────────────────────────────────────────
-    private boolean isOwnerOrAdmin(Long resourceId, String userId, String userRole) {
-        return String.valueOf(resourceId).equals(userId) || isAdmin(userRole);
+
+    private boolean isOwnerOrAdmin(UUID resourceId, String currentUserId, String userRole) {
+        try {
+            return resourceId.equals(UUID.fromString(currentUserId)) || isAdmin(userRole);
+        } catch (IllegalArgumentException e) {
+            return isAdmin(userRole);
+        }
     }
 
     private boolean isAdmin(String userRole) {

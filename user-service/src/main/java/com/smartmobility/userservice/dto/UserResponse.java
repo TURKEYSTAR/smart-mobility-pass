@@ -14,12 +14,13 @@ public class UserResponse {
     private String username;
     private String email;
     private String telephone;
+    private String role;
     private LocalDateTime createdAt;
 
-    // Données du MobilityPass embarquées dans la réponse
+    // Données du MobilityPass embarquées
     private String passNumber;
     private PassStatus passStatus;
-    private Double solde;
+    private BigDecimal solde;
 
     public UserResponse() {
     }
@@ -72,6 +73,14 @@ public class UserResponse {
         this.telephone = telephone;
     }
 
+    public String getRole() {
+        return role;
+    }
+
+    public void setRole(String role) {
+        this.role = role;
+    }
+
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }
@@ -96,11 +105,11 @@ public class UserResponse {
         this.passStatus = passStatus;
     }
 
-    public Double getSolde() {
+    public BigDecimal getSolde() {
         return solde;
     }
 
-    public void setSolde(Double solde) {
+    public void setSolde(BigDecimal solde) {
         this.solde = solde;
     }
 }

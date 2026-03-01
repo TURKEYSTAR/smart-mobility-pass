@@ -1,6 +1,7 @@
 package com.smartmobility.userservice.entity;
 
 import jakarta.persistence.*;
+import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
@@ -8,12 +9,12 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
+@Table(name = "users")
 public class User {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
-
 
     @NotBlank(message = "Le nom est obligatoire")
     @Size(max = 100)
@@ -30,16 +31,19 @@ public class User {
     @Column(nullable = false, unique = true, length = 50)
     private String username;
 
+    @Email
+    @Column(nullable = false, unique = true)
     private String email;
 
-    @NotBlank(message = "Le mot de passe est obligatoire")
-    @Column(nullable = false)
+    // Nullable : les comptes OAuth2 (Google) n'ont pas de mot de passe
+    @Column(nullable = true)
     private String password;
-
 
     @Column(length = 20)
     private String telephone;
-    LocalDateTime createdAt;
+
+    @Column(nullable = false)
+    private LocalDateTime createdAt;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
@@ -51,11 +55,22 @@ public class User {
     @Column(nullable = false)
     private boolean enabled = true;
 
-    @OneToOne(cascade = CascadeType.ALL)
-    @JoinColumn(name = "mobility_pass_id")
-    MobilityPass mobilityPass;
+    // User est le côté propriétaire de la relation
+    @OneToOne(cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @JoinColumn(name = "mobility_pass_id", referencedColumnName = "id")
+    private MobilityPass mobilityPass;
 
     public User() {
+    }
+
+    // ── Getters / Setters ─────────────────────────────────────────────────────
+
+    public UUID getId() {
+        return id;
+    }
+
+    public void setId(UUID id) {
+        this.id = id;
     }
 
     public String getNom() {
@@ -98,37 +113,20 @@ public class User {
         this.password = password;
     }
 
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
-    }
-
-    public void setCreatedAt(LocalDateTime createdAt) {
-        this.createdAt = createdAt;
-    }
-
-    public MobilityPass getMobilityPass() {
-        return mobilityPass;
-    }
-
-    public void setMobilityPass(MobilityPass mobilityPass) {
-        this.mobilityPass = mobilityPass;
-    }
-
-
-    public void setId(UUID id) {
-        this.id = id;
-    }
-
-    public UUID getId() {
-        return id;
-    }
-
     public String getTelephone() {
         return telephone;
     }
 
     public void setTelephone(String telephone) {
         this.telephone = telephone;
+    }
+
+    public LocalDateTime getCreatedAt() {
+        return createdAt;
+    }
+
+    public void setCreatedAt(LocalDateTime createdAt) {
+        this.createdAt = createdAt;
     }
 
     public Role getRole() {
@@ -142,6 +140,7 @@ public class User {
     public String getGoogleId() {
         return googleId;
     }
+
     public void setGoogleId(String googleId) {
         this.googleId = googleId;
     }
@@ -152,5 +151,13 @@ public class User {
 
     public void setEnabled(boolean enabled) {
         this.enabled = enabled;
+    }
+
+    public MobilityPass getMobilityPass() {
+        return mobilityPass;
+    }
+
+    public void setMobilityPass(MobilityPass mobilityPass) {
+        this.mobilityPass = mobilityPass;
     }
 }

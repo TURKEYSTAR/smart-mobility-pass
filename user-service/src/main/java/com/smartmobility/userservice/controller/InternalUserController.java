@@ -14,14 +14,8 @@ import org.springframework.web.server.ResponseStatusException;
 import java.time.LocalDateTime;
 
 /**
- * InternalUserController — user-service
- *
- * Endpoints INTERNES appelés uniquement par l'auth-service via Feign.
- * Ces routes ne sont PAS exposées publiquement via la Gateway
- * (pas de route /internal/** dans application.properties de la Gateway).
- *
- * ⚠️  En production : ajouter une vérification que l'appelant
- *     est bien un service interne (header X-Internal-Token ou réseau privé).
+ * InternalUserController — appelé uniquement par l'auth-service via Feign.
+ * PAS exposé par la Gateway (/internal/** non routé).
  */
 @RestController
 @RequestMapping("/internal/users")
@@ -30,13 +24,13 @@ public class InternalUserController {
     private final UserRepository userRepository;
     private final PassMobilityService passMobilityService;
 
-    public InternalUserController(UserRepository userRepository, PassMobilityService passMobilityService) {
+    public InternalUserController(UserRepository userRepository,
+                                  PassMobilityService passMobilityService) {
         this.userRepository = userRepository;
         this.passMobilityService = passMobilityService;
     }
 
-
-    // ── Chercher par email ────────────────────────────────────────────────────
+    // GET /internal/users/email/{email} — auth-service cherche si l'email existe
     @GetMapping("/email/{email}")
     public UserDto findByEmail(@PathVariable String email) {
         User user = userRepository.findByEmail(email)
@@ -45,28 +39,39 @@ public class InternalUserController {
         return toDto(user);
     }
 
-    // ── Créer un utilisateur ──────────────────────────────────────────────────
+    // POST /internal/users — auth-service crée un nouveau compte
     @PostMapping
     public ResponseEntity<UserDto> createUser(@RequestBody CreateUserRequest request) {
+
+        // Vérification email unique (sécurité supplémentaire côté user-service)
+        if (userRepository.existsByEmail(request.email())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Email déjà utilisé : " + request.email());
+        }
+
         User user = new User();
         user.setNom(request.nom());
         user.setPrenom(request.prenom());
         user.setEmail(request.email());
-        user.setPassword(request.password());   // déjà encodé par l'auth-service
+        user.setPassword(request.password());   // déjà encodé BCrypt par auth-service
         user.setUsername(request.username());
         user.setTelephone(request.telephone());
         user.setRole(Role.valueOf(request.role()));
         user.setEnabled(request.enabled());
         user.setGoogleId(request.googleId());
-
         user.setCreatedAt(LocalDateTime.now());
 
         User saved = userRepository.save(user);
+
+        // Créer et lier le MobilityPass automatiquement
         passMobilityService.creerPassAutomatique(saved);
-        return ResponseEntity.status(HttpStatus.CREATED).body(toDto(saved));
+
+        // Recharger pour avoir l'ID du pass dans la réponse
+        User withPass = userRepository.findById(saved.getId()).orElse(saved);
+        return ResponseEntity.status(HttpStatus.CREATED).body(toDto(withPass));
     }
 
-    // ── Mapper User → UserDto ─────────────────────────────────────────────────
+    // ── Mapper ────────────────────────────────────────────────────────────────
     private UserDto toDto(User user) {
         return new UserDto(
                 user.getId(),

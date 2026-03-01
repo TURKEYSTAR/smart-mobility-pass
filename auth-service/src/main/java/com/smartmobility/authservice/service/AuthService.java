@@ -12,12 +12,14 @@ import org.springframework.stereotype.Service;
 /**
  * AuthService — logique métier de l'authentification.
  *
- * Ce service NE touche PAS à la base de données directement.
+ * Ce service NE touche PAS à la base de données.
  * Il délègue toute la persistance au user-service via Feign.
  *
+ * JWT stateless : généré ici, validé par la Gateway, jamais stocké en BDD.
+ *
  * Responsabilités :
- *  - register   → encode le mot de passe, crée le user via Feign, génère JWT
- *  - login      → vérifie le mot de passe, génère JWT
+ *  - register    → encode le mot de passe, crée le user via Feign, génère JWT
+ *  - login       → vérifie le mot de passe, génère JWT
  *  - loginOAuth2 → crée ou récupère le user Google, génère JWT
  */
 @Service
@@ -47,41 +49,46 @@ public class AuthService {
             throw new IllegalArgumentException("Email déjà utilisé : " + request.email());
         }
 
-        // 2. Créer le user dans le user-service
+        // 2. Créer le user dans le user-service via Feign
+        // Ordre record CreateUserRequest : (nom, prenom, email, password, username, telephone, role, enabled, googleId)
         CreateUserRequest createRequest = new CreateUserRequest(
-                 // hash BCrypt ici
                 request.nom(),
                 request.prenom(),
                 request.email(),
-                passwordEncoder.encode(request.password()),
+                passwordEncoder.encode(request.password()),  // encodage BCrypt ici
                 request.username(),
                 request.telephone(),
                 "USER",   // rôle par défaut
-                true,
+                true,     // compte activé
                 null      // pas de googleId
         );
 
         UserDto created = userServiceClient.createUser(createRequest);
         log.info("Nouveau compte créé : {}", created.email());
 
-        // 3. Générer et retourner le JWT
+        // 3. Générer le JWT stateless (non stocké)
         String token = jwtUtil.generateToken(created.id(), created.email(), created.role());
-        return new AuthResponse(token, created.id(), created.email(), created.role(),
-                jwtUtil.extractAllClaims(token).getExpiration().getTime());
+        return new AuthResponse(
+                token,
+                created.id(),
+                created.email(),
+                created.role(),
+                jwtUtil.extractAllClaims(token).getExpiration().getTime()
+        );
     }
 
     // ── Login classique ───────────────────────────────────────────────────────
 
     public AuthResponse login(LoginRequest request) {
 
-        // 1. Chercher l'utilisateur
+        // 1. Chercher l'utilisateur par email
         UserDto user = findUserByEmailSafe(request.email());
-
         if (user == null) {
+            // Message volontairement vague pour ne pas révéler si l'email existe
             throw new IllegalArgumentException("Identifiants incorrects");
         }
 
-        // 2. Vérifier le mot de passe
+        // 2. Vérifier le mot de passe contre le hash BCrypt
         if (!passwordEncoder.matches(request.password(), user.password())) {
             throw new IllegalArgumentException("Identifiants incorrects");
         }
@@ -93,36 +100,41 @@ public class AuthService {
 
         log.info("Login réussi : {}", user.email());
 
-        // 4. Générer le JWT
+        // 4. Générer le JWT stateless
         String token = jwtUtil.generateToken(user.id(), user.email(), user.role());
-        return new AuthResponse(token, user.id(), user.email(), user.role(),
-                jwtUtil.extractAllClaims(token).getExpiration().getTime());
+        return new AuthResponse(
+                token,
+                user.id(),
+                user.email(),
+                user.role(),
+                jwtUtil.extractAllClaims(token).getExpiration().getTime()
+        );
     }
 
     // ── Login OAuth2 Google ───────────────────────────────────────────────────
 
     /**
      * Appelé par OAuth2SuccessHandler après authentification Google réussie.
-     * Crée le compte si première connexion, sinon met à jour le googleId.
+     * Crée le compte automatiquement à la première connexion.
      */
     public AuthResponse loginOAuth2(String email, String nom, String prenom, String googleId) {
 
         UserDto user = findUserByEmailSafe(email);
 
         if (user == null) {
-            // Première connexion Google → créer le compte automatiquement
-            log.info("Première connexion OAuth2, création du compte : {}", email);
+            log.info("Première connexion OAuth2 Google, création du compte : {}", email);
 
+            // Ordre record CreateUserRequest : (nom, prenom, email, password, username, telephone, role, enabled, googleId)
             CreateUserRequest createRequest = new CreateUserRequest(
-                    email,
-                    null,      // pas de mot de passe pour OAuth2
-                    nom != null ? nom : "",
-                    prenom != null ? prenom : "",
-                    email,     // username = email par défaut
-                    null,      // pas de téléphone
-                    "USER",
-                    true,
-                    googleId
+                    nom      != null ? nom      : "",   // nom
+                    prenom   != null ? prenom   : "",   // prenom
+                    email,                               // email
+                    null,                                // password → null pour OAuth2 (pas de mot de passe)
+                    email,                               // username = email par défaut
+                    null,                                // telephone → inconnu via Google
+                    "USER",                              // role par défaut
+                    true,                                // enabled
+                    googleId                             // googleId
             );
             user = userServiceClient.createUser(createRequest);
         }
@@ -132,29 +144,29 @@ public class AuthService {
         }
 
         String token = jwtUtil.generateToken(user.id(), user.email(), user.role());
-        return new AuthResponse(token, user.id(), user.email(), user.role(),
-                jwtUtil.extractAllClaims(token).getExpiration().getTime());
+        return new AuthResponse(
+                token,
+                user.id(),
+                user.email(),
+                user.role(),
+                jwtUtil.extractAllClaims(token).getExpiration().getTime()
+        );
     }
 
     // ── Utilitaire interne ────────────────────────────────────────────────────
 
     /**
      * Cherche un user par email sans lever d'exception si non trouvé (404).
-     * Feign lève FeignException.NotFound → on retourne null.
-     *
+     * Feign lève FeignException.NotFound pour un 404 → on retourne null proprement.
+     */
     private UserDto findUserByEmailSafe(String email) {
         try {
             return userServiceClient.findByEmail(email);
         } catch (FeignException.NotFound e) {
             return null;
-        }
-    }*/
-    private UserDto findUserByEmailSafe(String email) {
-        try {
-            return userServiceClient.findByEmail(email);
-        } catch (Exception e) { // Capture plus large pour le debug
-            log.warn("Utilisateur non trouvé ou erreur service : {}", email);
-            return null;
+        } catch (Exception e) {
+            log.error("Erreur lors de la recherche de l'utilisateur {} : {}", email, e.getMessage());
+            throw new IllegalStateException("Service utilisateur indisponible", e);
         }
     }
 }

@@ -8,16 +8,20 @@ import java.math.BigDecimal;
 import java.util.UUID;
 
 /**
- * Client Feign vers le Billing Service
- * Utilisé pour vérifier le total journalier (plafonnement)
+ * Client Feign vers le Billing Service.
+ * Utilisé pour vérifier le total journalier (plafonnement à 2000 FCFA/jour).
+ *
+ * Le billing-service écoute sur /api/billing/**
+ * La Gateway route /api/billing/** → billing-service sans stripPrefix
+ * → Feign appelle directement billing-service via lb://
  */
-@FeignClient(name = "billing-service", path = "/billing")
+@FeignClient(name = "billing-service", path = "/api/billing")
 public interface BillingServiceClient {
 
     /**
-     * Récupère le total des dépenses du jour pour un pass
-     * GET /billing/daily-total/{passId}
-     * Utilisé pour vérifier si le plafond journalier (2000 FCFA) est atteint
+     * GET /api/billing/daily-total/{passId}
+     * Retourne le total des dépenses du jour pour un pass donné.
+     * Utilisé pour le plafonnement journalier (2000 FCFA).
      */
     @GetMapping("/daily-total/{passId}")
     BigDecimal getDailyTotal(@PathVariable("passId") UUID passId);

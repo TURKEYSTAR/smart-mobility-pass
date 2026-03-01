@@ -1,11 +1,11 @@
 package com.smartmobility.pricingservice.service;
 
-
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.smartmobility.pricingservice.client.BillingServiceClient;
+import com.smartmobility.pricingservice.client.BillingClientWrapper;
 import com.smartmobility.pricingservice.dto.FareResult;
 import com.smartmobility.pricingservice.dto.PricingRequest;
 import com.smartmobility.pricingservice.entity.*;
+import com.smartmobility.pricingservice.exception.PricingRuleNotFoundException;
 import com.smartmobility.pricingservice.repository.DiscountPolicyRepository;
 import com.smartmobility.pricingservice.repository.FareCalculationRepository;
 import com.smartmobility.pricingservice.repository.PricingRuleRepository;
@@ -20,6 +20,7 @@ import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -29,7 +30,7 @@ public class FareCalculatorService {
     private final PricingRuleRepository pricingRuleRepository;
     private final DiscountPolicyRepository discountPolicyRepository;
     private final FareCalculationRepository fareCalculationRepository;
-    private final BillingServiceClient billingServiceClient;
+    private final BillingClientWrapper billingClientWrapper;
     private final ObjectMapper objectMapper;
 
     @Value("${pricing.daily-cap:2000}")
@@ -56,8 +57,8 @@ public class FareCalculatorService {
 
     @Transactional
     public FareResult calculateFare(PricingRequest request) {
-        log.info("[apigateway] ====== CALCUL TARIFAIRE ======");
-        log.info("[apigateway] TripId={}, Type={}, Distance={}km, Tier={}, TotalTrajets={}",
+        log.info("[FareCalculator] ====== CALCUL TARIFAIRE ======");
+        log.info("[FareCalculator] TripId={}, Type={}, Distance={}km, Tier={}, TotalTrajets={}",
                 request.getTripId(), request.getTransportType(),
                 request.getDistanceKm(), request.getPassTier(), request.getTotalTrips());
 
@@ -66,35 +67,26 @@ public class FareCalculatorService {
 
         // ---- ÉTAPE 2 : Calcul du prix de base ----
         BigDecimal baseAmount = calculateBasePrice(rule, request.getDistanceKm());
-        log.info("[apigateway] Prix de base: {} FCFA ({} + {} × {}km)",
+        log.info("[FareCalculator] Prix de base: {} FCFA ({} + {} × {}km)",
                 baseAmount, rule.getBasePrice(), rule.getPricePerKm(), request.getDistanceKm());
 
         // ---- ÉTAPE 3 : Application des réductions ----
         List<String> appliedDiscounts = new ArrayList<>();
-        BigDecimal totalDiscount = BigDecimal.ZERO;
         BigDecimal currentAmount = baseAmount;
 
-        // Réduction heures creuses
-        currentAmount = applyOffPeakDiscount(currentAmount, request.getDepartureTime(),
-                appliedDiscounts);
+        currentAmount = applyOffPeakDiscount(currentAmount, request.getDepartureTime(), appliedDiscounts);
+        currentAmount = applyTierDiscount(currentAmount, request.getPassTier(), appliedDiscounts);
+        currentAmount = applyLoyaltyDiscount(currentAmount, request.getTotalTrips(), appliedDiscounts);
 
-        // Réduction par tier du pass
-        currentAmount = applyTierDiscount(currentAmount, request.getPassTier(),
-                appliedDiscounts);
+        BigDecimal totalDiscount = baseAmount.subtract(currentAmount);
 
-        // Réduction fidélité
-        currentAmount = applyLoyaltyDiscount(currentAmount, request.getTotalTrips(),
-                appliedDiscounts);
-
-        totalDiscount = baseAmount.subtract(currentAmount);
-
-        // ---- ÉTAPE 4 : Vérification du plafond journalier ----
+        // ---- ÉTAPE 4 : Vérification du plafond journalier (avec circuit breaker) ----
         boolean capped = false;
         BigDecimal finalAmount = currentAmount;
 
-        try {
-            BigDecimal dailyTotal = billingServiceClient.getDailyTotal(request.getPassId());
-            log.info("[apigateway] Total journalier actuel: {} FCFA (plafond: {} FCFA)",
+        BigDecimal dailyTotal = getDailyTotalSafe(request.getPassId());
+        if (dailyTotal != null) {
+            log.info("[FareCalculator] Total journalier actuel: {} FCFA (plafond: {} FCFA)",
                     dailyTotal, dailyCap);
 
             if (dailyTotal.add(currentAmount).compareTo(dailyCap) > 0) {
@@ -103,32 +95,27 @@ public class FareCalculatorService {
                     finalAmount = remaining;
                     capped = true;
                     appliedDiscounts.add("PLAFOND JOURNALIER appliqué (max " + dailyCap + " FCFA/jour)");
-                    log.info("[apigateway] Plafond journalier atteint! Montant plafonné: {} FCFA → {} FCFA",
-                            currentAmount, finalAmount);
+                    log.info("[FareCalculator] Plafond atteint! {} FCFA → {} FCFA", currentAmount, finalAmount);
                 } else {
-                    // Plafond déjà atteint → trajet gratuit
                     finalAmount = BigDecimal.ZERO;
                     capped = true;
                     appliedDiscounts.add("PLAFOND JOURNALIER atteint - trajet sans frais");
-                    log.info("[apigateway] Plafond journalier déjà atteint. Trajet gratuit!");
+                    log.info("[FareCalculator] Plafond déjà atteint. Trajet gratuit!");
                 }
             }
-        } catch (Exception e) {
-            log.warn("[apigateway] Impossible de vérifier le plafond journalier: {}", e.getMessage());
-            // En cas d'erreur, on continue sans vérification du plafond
+        } else {
+            log.warn("[FareCalculator] Billing-service indisponible, plafond journalier non vérifié");
         }
 
-        // S'assurer que le montant ne peut pas être négatif
+        // Montant final jamais négatif
         finalAmount = finalAmount.max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
         totalDiscount = baseAmount.subtract(finalAmount).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
 
-        // ---- ÉTAPE 5 : Sauvegarde du calcul ----
+        // ---- ÉTAPE 5 : Sauvegarde ----
         saveCalculation(request, baseAmount, totalDiscount, finalAmount, appliedDiscounts, capped);
 
-        log.info("[apigateway] === RÉSULTAT FINAL ===");
-        log.info("[apigateway] Base: {} | Réduction: {} | Final: {} FCFA",
+        log.info("[FareCalculator] === RÉSULTAT === Base:{} | Réduction:{} | Final:{} FCFA",
                 baseAmount, totalDiscount, finalAmount);
-        log.info("[apigateway] Réductions appliquées: {}", appliedDiscounts);
 
         return FareResult.builder()
                 .baseAmount(baseAmount)
@@ -136,9 +123,17 @@ public class FareCalculatorService {
                 .finalAmount(finalAmount)
                 .appliedDiscounts(appliedDiscounts)
                 .cappedByDailyLimit(capped)
-                .fallbackUsed(false)
+                .fallbackUsed(dailyTotal == null)
                 .note(buildNote(appliedDiscounts, capped))
                 .build();
+    }
+
+    // ================================================================
+    // Appel vers billing-service via wrapper (Circuit Breaker dans BillingClientWrapper)
+    // ================================================================
+
+    private BigDecimal getDailyTotalSafe(UUID passId) {
+        return billingClientWrapper.getDailyTotal(passId);
     }
 
     // ================================================================
@@ -149,7 +144,7 @@ public class FareCalculatorService {
         return pricingRuleRepository
                 .findByTransportTypeAndActiveTrue(request.getTransportType())
                 .orElseGet(() -> {
-                    log.warn("[apigateway] Règle non trouvée en DB pour {}, utilisation valeurs par défaut",
+                    log.warn("[FareCalculator] Règle non trouvée pour {}, valeurs par défaut",
                             request.getTransportType());
                     return getDefaultRule(request.getTransportType());
                 });
@@ -170,47 +165,42 @@ public class FareCalculatorService {
     }
 
     // ================================================================
-    // ÉTAPE 2 : Calcul du prix de base
-    // Formule: base = basePrice + (distance × pricePerKm)
+    // ÉTAPE 2 : Prix de base = basePrice + (distance × pricePerKm)
     // ================================================================
 
     private BigDecimal calculateBasePrice(PricingRule rule, Double distanceKm) {
         BigDecimal distance = BigDecimal.valueOf(distanceKm);
-        BigDecimal distanceCost = rule.getPricePerKm().multiply(distance);
-        return rule.getBasePrice().add(distanceCost).setScale(2, RoundingMode.HALF_UP);
+        return rule.getBasePrice()
+                .add(rule.getPricePerKm().multiply(distance))
+                .setScale(2, RoundingMode.HALF_UP);
     }
 
     // ================================================================
-    // ÉTAPE 3a : Réduction Heures Creuses (22h - 6h) → -20%
+    // ÉTAPE 3a : Heures creuses (22h–6h) → -20%
     // ================================================================
 
     private BigDecimal applyOffPeakDiscount(BigDecimal amount, LocalDateTime departureTime,
                                             List<String> appliedDiscounts) {
         if (departureTime == null) return amount;
-
         int hour = departureTime.getHour();
         boolean isOffPeak = hour >= offPeakStartHour || hour < offPeakEndHour;
-
         if (isOffPeak) {
             BigDecimal discount = amount.multiply(offPeakDiscountPercent)
                     .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
-            BigDecimal reduced = amount.subtract(discount);
-            appliedDiscounts.add("HEURES CREUSES (" + hour + "h00) -" + offPeakDiscountPercent + "%");
-            log.info("[apigateway] Réduction heures creuses: -{} FCFA (-{}%)",
-                    discount, offPeakDiscountPercent);
-            return reduced;
+            appliedDiscounts.add("HEURES CREUSES (" + hour + "h) -" + offPeakDiscountPercent + "%");
+            log.info("[FareCalculator] Heures creuses: -{} FCFA", discount);
+            return amount.subtract(discount);
         }
         return amount;
     }
 
     // ================================================================
-    // ÉTAPE 3b : Réduction par Tier du Pass
-    // SILVER: -10%, GOLD: -15%, PLATINUM: -30%
+    // ÉTAPE 3b : Réduction tier (SILVER -10%, GOLD -15%, PLATINUM -30%)
     // ================================================================
 
     private BigDecimal applyTierDiscount(BigDecimal amount, String passTier,
                                          List<String> appliedDiscounts) {
-        if (passTier == null || passTier.equals("STANDARD")) return amount;
+        if (passTier == null || passTier.equalsIgnoreCase("STANDARD")) return amount;
 
         BigDecimal tierDiscountPercent = switch (passTier.toUpperCase()) {
             case "SILVER"   -> BigDecimal.valueOf(10);
@@ -222,17 +212,15 @@ public class FareCalculatorService {
         if (tierDiscountPercent.compareTo(BigDecimal.ZERO) > 0) {
             BigDecimal discount = amount.multiply(tierDiscountPercent)
                     .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
-            BigDecimal reduced = amount.subtract(discount);
             appliedDiscounts.add("TIER " + passTier.toUpperCase() + " -" + tierDiscountPercent + "%");
-            log.info("[apigateway] Réduction tier {}: -{} FCFA (-{}%)",
-                    passTier, discount, tierDiscountPercent);
-            return reduced;
+            log.info("[FareCalculator] Tier {}: -{} FCFA", passTier, discount);
+            return amount.subtract(discount);
         }
         return amount;
     }
 
     // ================================================================
-    // ÉTAPE 3c : Réduction Fidélité (>= 10 trajets) → -5%
+    // ÉTAPE 3c : Fidélité (>= 10 trajets) → -5%
     // ================================================================
 
     private BigDecimal applyLoyaltyDiscount(BigDecimal amount, int totalTrips,
@@ -240,17 +228,15 @@ public class FareCalculatorService {
         if (totalTrips >= loyaltyTripsRequired) {
             BigDecimal discount = amount.multiply(loyaltyDiscountPercent)
                     .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
-            BigDecimal reduced = amount.subtract(discount);
             appliedDiscounts.add("FIDÉLITÉ (" + totalTrips + " trajets) -" + loyaltyDiscountPercent + "%");
-            log.info("[apigateway] Réduction fidélité: -{} FCFA (-{}%)",
-                    discount, loyaltyDiscountPercent);
-            return reduced;
+            log.info("[FareCalculator] Fidélité: -{} FCFA", discount);
+            return amount.subtract(discount);
         }
         return amount;
     }
 
     // ================================================================
-    // Sauvegarde du calcul en base
+    // Sauvegarde historique
     // ================================================================
 
     private void saveCalculation(PricingRequest request, BigDecimal base,
@@ -258,7 +244,7 @@ public class FareCalculatorService {
                                  List<String> discounts, boolean capped) {
         try {
             String discountsJson = objectMapper.writeValueAsString(discounts);
-            FareCalculation calc = FareCalculation.builder()
+            fareCalculationRepository.save(FareCalculation.builder()
                     .tripId(request.getTripId())
                     .passId(request.getPassId())
                     .baseAmount(base)
@@ -267,31 +253,29 @@ public class FareCalculatorService {
                     .appliedDiscounts(discountsJson)
                     .cappedByDailyLimit(capped)
                     .fallbackUsed(false)
-                    .build();
-            fareCalculationRepository.save(calc);
-            log.info("[apigateway] Calcul sauvegardé en DB ✅");
+                    .build());
+            log.info("[FareCalculator] Calcul sauvegardé ✅");
         } catch (Exception e) {
-            log.error("[apigateway] Erreur sauvegarde calcul: {}", e.getMessage());
+            log.error("[FareCalculator] Erreur sauvegarde: {}", e.getMessage());
         }
     }
 
     private String buildNote(List<String> discounts, boolean capped) {
         if (discounts.isEmpty()) return "Tarif standard appliqué (aucune réduction)";
-        StringBuilder note = new StringBuilder("Réductions appliquées: ");
-        note.append(String.join(", ", discounts));
+        StringBuilder note = new StringBuilder("Réductions: ").append(String.join(", ", discounts));
         if (capped) note.append(" | Plafond journalier atteint");
         return note.toString();
     }
 
     // ================================================================
-    // LECTURE : Règles tarifaires
+    // READ
     // ================================================================
 
     public List<PricingRule> getAllRules() {
         return pricingRuleRepository.findAll();
     }
 
-    public FareCalculation getCalculationByTripId(java.util.UUID tripId) {
+    public FareCalculation getCalculationByTripId(UUID tripId) {
         return fareCalculationRepository.findByTripId(tripId).orElse(null);
     }
 }

@@ -5,21 +5,20 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 
+/**
+ * SecurityConfig user-service.
+ *
+ * Ce service ne fait PAS d'authentification — c'est le rôle de l'auth-service.
+ * La Gateway vérifie le JWT et injecte X-User-Id / X-User-Role dans chaque requête.
+ * Ici on fait confiance à ces headers, donc tout est permitAll.
+ *
+ * On garde Spring Security uniquement pour désactiver CSRF et forcer le mode stateless.
+ */
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
-
-    /**
-     * ✅ C'est CE bean qui manquait → résout l'erreur "No beans of PasswordEncoder type found"
-     */
-    @Bean
-    public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
-    }
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -29,15 +28,8 @@ public class SecurityConfig {
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
                 .authorizeHttpRequests(auth -> auth
-
-                        .requestMatchers("/internal/**").permitAll()
-                        // Actuator
-                        .requestMatchers("/actuator/**").permitAll()
-                        // Tout le reste : la Gateway a déjà vérifié le JWT
-                        // On fait confiance aux headers X-User-Id / X-User-Role
                         .anyRequest().permitAll()
                 );
-
         return http.build();
     }
 }

@@ -1,25 +1,22 @@
 package com.smartmobility.userservice.controller;
 
-import com.smartmobility.userservice.dto.*;
+import com.smartmobility.userservice.dto.UpdateUserRequest;
+import com.smartmobility.userservice.dto.UserResponse;
 import com.smartmobility.userservice.service.UserService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.UUID;
 
 /**
- * UserController — gestion du profil utilisateur uniquement.
+ * UserController — gestion du profil utilisateur.
  *
- * Délègue à : UserService
+ * Rôles :
+ *   USER  → consulter et modifier son propre profil
+ *   ADMIN → consulter tous les profils, supprimer un utilisateur
  *
- * Endpoints :
- *   GET    /api/users          → liste tous (MANAGER / ADMIN)
- *   GET    /api/users/{id}     → voir un profil
- *   PUT    /api/users/{id}     → modifier un profil
- *   DELETE /api/users/{id}     → supprimer (ADMIN)
- *
- * Sécurité assurée par la Gateway → headers X-User-Id / X-User-Role injectés.
- * Pas de Spring Security ici.
+ * Sécurité : Gateway injecte X-User-Id (UUID) et X-User-Role dans chaque requête.
  */
 @RestController
 @RequestMapping("/api/users")
@@ -31,7 +28,7 @@ public class UserController {
         this.userService = userService;
     }
 
-    // GET /api/users — ADMIN uniquement (dashboard)
+    // GET /api/users — liste tous les utilisateurs (ADMIN dashboard)
     @GetMapping
     public ResponseEntity<?> listerUtilisateurs(
             @RequestHeader("X-User-Role") String userRole) {
@@ -39,40 +36,41 @@ public class UserController {
         if (!isAdmin(userRole)) {
             return ResponseEntity.status(403).body("Accès refusé : réservé aux ADMIN");
         }
-        return ResponseEntity.ok(userService.obtenirTousLesUtilisateurs());
+        List<UserResponse> users = userService.obtenirTousLesUtilisateurs();
+        return ResponseEntity.ok(users);
     }
 
-    // GET /api/users/{id} — son propre profil OU ADMIN
+    // GET /api/users/{id} — voir un profil (son propre ou ADMIN)
     @GetMapping("/{id}")
     public ResponseEntity<?> obtenirUtilisateur(
-            @PathVariable Long id,
-            @RequestHeader("X-User-Id")   String userId,
+            @PathVariable UUID id,
+            @RequestHeader("X-User-Id")   String currentUserId,
             @RequestHeader("X-User-Role") String userRole) {
 
-        if (!isOwnerOrAdmin(id, userId, userRole)) {
+        if (!isOwnerOrAdmin(id, currentUserId, userRole)) {
             return ResponseEntity.status(403).body("Accès refusé");
         }
         return ResponseEntity.ok(userService.obtenirUtilisateur(id));
     }
 
-    // PUT /api/users/{id} — son propre profil OU ADMIN
+    // PUT /api/users/{id} — modifier son profil (son propre ou ADMIN)
     @PutMapping("/{id}")
     public ResponseEntity<?> mettreAJourUtilisateur(
-            @PathVariable Long id,
-            @RequestHeader("X-User-Id")   String userId,
+            @PathVariable UUID id,
+            @RequestHeader("X-User-Id")   String currentUserId,
             @RequestHeader("X-User-Role") String userRole,
             @RequestBody UpdateUserRequest request) {
 
-        if (!isOwnerOrAdmin(id, userId, userRole)) {
+        if (!isOwnerOrAdmin(id, currentUserId, userRole)) {
             return ResponseEntity.status(403).body("Accès refusé");
         }
         return ResponseEntity.ok(userService.mettreAJourUtilisateur(id, request));
     }
 
-    // DELETE /api/users/{id} — ADMIN uniquement
+    // DELETE /api/users/{id} — supprimer un utilisateur (ADMIN uniquement)
     @DeleteMapping("/{id}")
     public ResponseEntity<?> supprimerUtilisateur(
-            @PathVariable Long id,
+            @PathVariable UUID id,
             @RequestHeader("X-User-Role") String userRole) {
 
         if (!isAdmin(userRole)) {
@@ -83,8 +81,18 @@ public class UserController {
     }
 
     // ── Utilitaires ───────────────────────────────────────────────────────────
-    private boolean isOwnerOrAdmin(Long resourceId, String userId, String userRole) {
-        return String.valueOf(resourceId).equals(userId) || isAdmin(userRole);
+
+    /**
+     * Vérifie si l'utilisateur courant est le propriétaire de la ressource ou ADMIN.
+     * X-User-Id injecté par la Gateway est un UUID sous forme de String.
+     */
+    private boolean isOwnerOrAdmin(UUID resourceId, String currentUserId, String userRole) {
+        try {
+            return resourceId.equals(UUID.fromString(currentUserId)) || isAdmin(userRole);
+        } catch (IllegalArgumentException e) {
+            // currentUserId mal formé → accès refusé
+            return isAdmin(userRole);
+        }
     }
 
     private boolean isAdmin(String userRole) {
