@@ -1,9 +1,7 @@
 package com.smartmobility.tripservice.entity;
 
 public enum TripStatus {
-    INITIATED,
-    IN_PROGRESS,
-    PENDING_PAYMENT,
-    COMPLETED,
-    CANCELLED
+    IN_PROGRESS,  // Trajet démarré — débit effectué, en cours
+    COMPLETED,    // Trajet terminé par l'utilisateur
+    CANCELLED     // Trajet annulé — pas de remboursement
 }

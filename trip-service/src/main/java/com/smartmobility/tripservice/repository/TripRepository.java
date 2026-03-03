@@ -32,4 +32,9 @@ public interface TripRepository extends JpaRepository<Trip, UUID> {
             @Param("passId") UUID passId,
             @Param("startOfDay") LocalDateTime startOfDay
     );
+
+    // ✅ Requête pour le plafond journalier
+    List<Trip> findByUserIdAndCreatedAtBetween(UUID userId,
+                                               LocalDateTime start,
+                                               LocalDateTime end);
 }

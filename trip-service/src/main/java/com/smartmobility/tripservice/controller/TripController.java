@@ -4,14 +4,13 @@ import com.smartmobility.tripservice.dto.TripRequest;
 import com.smartmobility.tripservice.dto.TripResponse;
 import com.smartmobility.tripservice.entity.Trip;
 import com.smartmobility.tripservice.service.TripService;
-import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 @RestController
@@ -22,71 +21,56 @@ public class TripController {
 
     private final TripService tripService;
 
-    /**
-     * POST /trips/initiate
-     * Flux complet : validation → enregistrement → tarif → débit → notification
-     */
+    // ── Initier un trajet → IN_PROGRESS (pas de débit) ────────────────────────
     @PostMapping("/initiate")
     public ResponseEntity<TripResponse> initiateTrip(
-            @Valid @RequestBody TripRequest request,
-            @RequestHeader(value = "X-User-Id", required = false) String userIdHeader) {
+            @RequestBody TripRequest request,
+            @RequestHeader("X-User-Id") String userId) {
 
-        UUID userId = userIdHeader != null
-                ? UUID.fromString(userIdHeader)
-                : UUID.randomUUID();
-
-        log.info("[TripController] POST /trips/initiate - UserId={}, PassId={}",
-                userId, request.getPassId());
-
-        TripResponse response = tripService.initiateTrip(request, userId);
-        return ResponseEntity.status(201).body(response);
+        log.info("[TripController] POST /trips/initiate - userId={}", userId);
+        TripResponse response = tripService.initiateTrip(request, UUID.fromString(userId));
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
-    /**
-     * GET /trips/{tripId}
-     */
-    @GetMapping("/{tripId}")
-    public ResponseEntity<Trip> getTripById(@PathVariable UUID tripId) {
-        log.info("[TripController] GET /trips/{}", tripId);
-        return tripService.getTripById(tripId)
-                .map(ResponseEntity::ok)
-                .orElse(ResponseEntity.notFound().build());
+    // ── Terminer un trajet → COMPLETED + débit ────────────────────────────────
+    @PutMapping("/{tripId}/complete")
+    public ResponseEntity<TripResponse> completeTrip(
+            @PathVariable UUID tripId,
+            @RequestHeader("X-User-Id") String userId) {
+
+        log.info("[TripController] PUT /trips/{}/complete - userId={}", tripId, userId);
+        TripResponse response = tripService.completeTrip(tripId, UUID.fromString(userId));
+        return ResponseEntity.ok(response);
     }
 
-    /**
-     * GET /trips/user/{userId}
-     */
+    // ── Annuler un trajet → CANCELLED (pas de remboursement) ─────────────────
+    @PutMapping("/{tripId}/cancel")
+    public ResponseEntity<TripResponse> cancelTrip(
+            @PathVariable UUID tripId,
+            @RequestHeader("X-User-Id") String userId) {
+
+        log.info("[TripController] PUT /trips/{}/cancel - userId={}", tripId, userId);
+        TripResponse response = tripService.cancelTrip(tripId, UUID.fromString(userId));
+        return ResponseEntity.ok(response);
+    }
+
+    // ── Mes trajets ───────────────────────────────────────────────────────────
     @GetMapping("/user/{userId}")
     public ResponseEntity<List<Trip>> getTripsByUser(@PathVariable UUID userId) {
-        log.info("[TripController] GET /trips/user/{}", userId);
         return ResponseEntity.ok(tripService.getTripsByUserId(userId));
     }
 
-    /**
-     * GET /trips/pass/{passId}
-     */
-    @GetMapping("/pass/{passId}")
-    public ResponseEntity<List<Trip>> getTripsByPass(@PathVariable UUID passId) {
-        log.info("[TripController] GET /trips/pass/{}", passId);
-        return ResponseEntity.ok(tripService.getTripsByPassId(passId));
-    }
-
-    /**
-     * GET /trips/health
-     */
-    @GetMapping("/health")
-    public ResponseEntity<String> health() {
-        return ResponseEntity.ok("Trip Management Service ✅ - Port 8082");
-    }
-
+    // ── Tous les trajets (admin) ──────────────────────────────────────────────
     @GetMapping
-    public ResponseEntity<?> getTousLesTrajets(
-            @RequestHeader("X-User-Role") String userRole) {
-
-        if (!"ADMIN".equalsIgnoreCase(userRole)) {
-            return ResponseEntity.status(403)
-                    .body(Map.of("error", "Accès refusé : réservé aux ADMIN"));
-        }
+    public ResponseEntity<List<Trip>> getAllTrips() {
         return ResponseEntity.ok(tripService.getTousLesTrajets());
+    }
+
+    // ── Un trajet par ID ──────────────────────────────────────────────────────
+    @GetMapping("/{tripId}")
+    public ResponseEntity<Trip> getTripById(@PathVariable UUID tripId) {
+        return tripService.getTripById(tripId)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
     }
 }

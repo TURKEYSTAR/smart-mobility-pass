@@ -6,7 +6,6 @@ import com.smartmobility.notificationservice.messaging.*;
 import com.smartmobility.notificationservice.repository.NotificationRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,85 +21,160 @@ public class NotificationService {
 
     private final NotificationRepository notificationRepository;
 
-    @Value("${notification-service.seuil.solde-faible:500}")
-    private BigDecimal seuilSoldeFaible;
+    // ════════════════════════════════════════════════════════════════════════
+    // TRAJETS
+    // ════════════════════════════════════════════════════════════════════════
+
+    @Transactional
+    public void handleTripStarted(TripStartedEvent event) {
+        String msg = String.format(
+                "Votre trajet %s a démarré — %s → %s | %.0f FCFA débités.",
+                event.getTransportType(), event.getOrigin(), event.getDestination(),
+                event.getEstimatedFare());
+
+        save(Notification.builder()
+                .userId(event.getUserId()).passId(event.getPassId()).tripId(event.getTripId())
+                .type(NotificationType.TRIP_STARTED).message(msg)
+                .amount(event.getEstimatedFare()).build());
+
+        log.info("[NotifService] TRIP_STARTED - userId={}", event.getUserId());
+    }
 
     @Transactional
     public void handleTripCompleted(TripCompletedEvent event) {
-        String message = String.format(
-                "Trajet %s complété ✅ | Montant débité : %.0f FCFA | Solde restant : %.0f FCFA",
-                event.getTransportType(), event.getAmount(), event.getBalanceAfter());
+        String msg = String.format(
+                "Trajet %s terminé | %.0f FCFA débités | Solde restant : %.0f FCFA",
+                event.getTransportType(), event.getAmount(),
+                event.getBalanceAfter() != null ? event.getBalanceAfter() : BigDecimal.ZERO);
 
-        notificationRepository.save(Notification.builder()
+        save(Notification.builder()
                 .userId(event.getUserId()).passId(event.getPassId()).tripId(event.getTripId())
-                .type(NotificationType.TRIP_COMPLETED).message(message)
-                .amount(event.getAmount()).balanceAfter(event.getBalanceAfter())
-                .build());
+                .type(NotificationType.TRIP_COMPLETED).message(msg)
+                .amount(event.getAmount()).balanceAfter(event.getBalanceAfter()).build());
 
-        if (event.getBalanceAfter() != null && event.getBalanceAfter().compareTo(seuilSoldeFaible) < 0) {
-            handleLowBalance(event);
-        }
+        log.info("[NotifService] TRIP_COMPLETED - userId={}", event.getUserId());
     }
 
     @Transactional
     public void handlePricingFallback(PricingFallbackEvent event) {
-        String message = String.format(
-                "⚠️ Tarif standard appliqué pour votre trajet %s (%.0f FCFA) — service tarifaire temporairement indisponible.",
+        String msg = String.format(
+                "Tarif standard appliqué pour votre trajet %s (%.0f FCFA) — service tarifaire temporairement indisponible.",
                 event.getTransportType(), event.getUsedFallbackAmount());
 
         notificationRepository.save(Notification.builder()
                 .userId(event.getPassId()).passId(event.getPassId()).tripId(event.getTripId())
-                .type(NotificationType.PRICING_FALLBACK).message(message)
+                .type(NotificationType.PRICING_FALLBACK).message(msg)
                 .amount(event.getUsedFallbackAmount())
                 .build());
+        log.warn("[NotifService] PRICING_FALLBACK - userId={}", event.getPassId());
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // SOLDE
+    // ════════════════════════════════════════════════════════════════════════
+
+    @Transactional
+    public void handleLowBalance(LowBalanceEvent event) {
+        String msg = String.format(
+                "Solde faible ! Il vous reste %.0f FCFA sur votre Mobility Pass. Pensez à recharger.",
+                event.getCurrentBalance() != null ? event.getCurrentBalance() : BigDecimal.ZERO);
+
+        save(Notification.builder()
+                .userId(event.getUserId()).passId(event.getPassId())
+                .type(NotificationType.LOW_BALANCE).message(msg)
+                .balanceAfter(event.getCurrentBalance()).build());
+
+        log.warn("[NotifService] LOW_BALANCE - userId={}, solde={}", event.getUserId(), event.getCurrentBalance());
     }
 
     @Transactional
     public void handleInsufficientBalance(InsufficientBalanceEvent event) {
-        String message = String.format(
-                "❌ Trajet refusé — Solde insuffisant. Solde actuel : %.0f FCFA. " +
-                        "Rechargez votre Mobility Pass pour continuer à voyager.",
+        String msg = String.format(
+                "Trajet refusé — Solde insuffisant. Solde actuel : %.0f FCFA. Rechargez votre Mobility Pass.",
                 event.getCurrentBalance() != null ? event.getCurrentBalance() : BigDecimal.ZERO);
 
-        notificationRepository.save(Notification.builder()
+        save(Notification.builder()
                 .userId(event.getUserId()).passId(event.getPassId())
-                .type(NotificationType.INSUFFICIENT_BALANCE).message(message)
-                .balanceAfter(event.getCurrentBalance())
-                .build());
+                .type(NotificationType.INSUFFICIENT_BALANCE).message(msg)
+                .balanceAfter(event.getCurrentBalance()).build());
+
+        log.warn("[NotifService] INSUFFICIENT_BALANCE - userId={}", event.getUserId());
     }
 
-    // ✅ NOUVEAU
+    @Transactional
+    public void handleDailyLimitReached(DailyLimitReachedEvent event) {
+        String msg = String.format(
+                "Plafond journalier atteint ! Vous avez dépensé %.0f FCFA aujourd'hui (plafond : %.0f FCFA). " +
+                        "Vous pourrez effectuer de nouveaux trajets demain.",
+                event.getTotalSpentToday(), event.getDailyLimit());
+
+        save(Notification.builder()
+                .userId(event.getUserId()).passId(event.getPassId())
+                .type(NotificationType.DAILY_LIMIT_REACHED).message(msg)
+                .amount(event.getTotalSpentToday()).build());
+
+        log.warn("[NotifService] DAILY_LIMIT_REACHED - userId={}, dépensé={} FCFA",
+                event.getUserId(), event.getTotalSpentToday());
+    }
+
+    @Transactional
+    public void handleRechargeRefused(RechargeRefusedEvent event) {
+        String reason = "PASS_SUSPENDED".equals(event.getReason())
+                ? "votre pass est suspendu"
+                : "votre pass est expiré";
+
+        String msg = String.format(
+                "Recharge de %.0f FCFA refusée — %s. Contactez un administrateur.",
+                event.getAttemptedAmount() != null ? event.getAttemptedAmount() : BigDecimal.ZERO,
+                reason);
+
+        save(Notification.builder()
+                .userId(event.getUserId()).passId(event.getPassId())
+                .type(NotificationType.RECHARGE_REFUSED).message(msg)
+                .amount(event.getAttemptedAmount()).build());
+
+        log.warn("[NotifService] RECHARGE_REFUSED - userId={}, raison={}", event.getUserId(), event.getReason());
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // PASS
+    // ════════════════════════════════════════════════════════════════════════
+
     @Transactional
     public void handlePassSuspended(PassSuspendedEvent event) {
-        String message = String.format(
-                "⛔ Votre Mobility Pass %s a été suspendu par un administrateur. " +
-                        "Solde actuel : %.0f FCFA. Contactez le support pour plus d'informations.",
+        String msg = String.format(
+                "Votre Mobility Pass %s a été suspendu par un administrateur. " +
+                        "Solde actuel : %.0f FCFA. Contactez le support.",
                 event.getPassNumber(),
                 event.getCurrentBalance() != null ? event.getCurrentBalance() : BigDecimal.ZERO);
 
-        notificationRepository.save(Notification.builder()
-                .userId(event.getUserId())
-                .passId(event.getPassId())
-                .type(NotificationType.PASS_SUSPENDED)
-                .message(message)
-                .balanceAfter(event.getCurrentBalance())
-                .build());
+        save(Notification.builder()
+                .userId(event.getUserId()).passId(event.getPassId())
+                .type(NotificationType.PASS_SUSPENDED).message(msg)
+                .balanceAfter(event.getCurrentBalance()).build());
 
-        log.warn("[NotificationService] ⛔ PASS_SUSPENDED sauvegardée - userId={}, pass={}",
-                event.getUserId(), event.getPassNumber());
+        log.warn("[NotifService] PASS_SUSPENDED - userId={}, pass={}", event.getUserId(), event.getPassNumber());
     }
 
-    private void handleLowBalance(TripCompletedEvent event) {
-        String message = String.format(
-                "⚠️ Solde faible ! Il vous reste %.0f FCFA sur votre Mobility Pass. Pensez à recharger.",
-                event.getBalanceAfter());
+    @Transactional
+    public void handlePassActivated(PassActivatedEvent event) {
+        String msg = String.format(
+                "Votre Mobility Pass %s a été réactivé par un administrateur. " +
+                        "Solde disponible : %.0f FCFA. Bon voyage !",
+                event.getPassNumber(),
+                event.getCurrentBalance() != null ? event.getCurrentBalance() : BigDecimal.ZERO);
 
-        notificationRepository.save(Notification.builder()
-                .userId(event.getUserId()).passId(event.getPassId()).tripId(event.getTripId())
-                .type(NotificationType.LOW_BALANCE).message(message)
-                .balanceAfter(event.getBalanceAfter())
-                .build());
+        save(Notification.builder()
+                .userId(event.getUserId()).passId(event.getPassId())
+                .type(NotificationType.PASS_ACTIVATED).message(msg)
+                .balanceAfter(event.getCurrentBalance()).build());
+
+        log.info("[NotifService] PASS_ACTIVATED - userId={}, pass={}", event.getUserId(), event.getPassNumber());
     }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // LECTURE / GESTION
+    // ════════════════════════════════════════════════════════════════════════
 
     public List<Notification> getNotificationsByUserId(UUID userId) {
         return notificationRepository.findByUserIdOrderByCreatedAtDesc(userId);
@@ -124,8 +198,20 @@ public class NotificationService {
 
     @Transactional
     public void markAllAsRead(UUID userId) {
-        List<Notification> unread = notificationRepository.findByUserIdAndReadFalseOrderByCreatedAtDesc(userId);
+        List<Notification> unread =
+                notificationRepository.findByUserIdAndReadFalseOrderByCreatedAtDesc(userId);
         unread.forEach(n -> n.setRead(true));
         notificationRepository.saveAll(unread);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // HELPER
+    // ════════════════════════════════════════════════════════════════════════
+
+    private Notification save(Notification n) {
+        Notification saved = notificationRepository.save(n);
+        log.debug("[NotifService] Notification sauvegardée — id={}, type={}, userId={}",
+                saved.getId(), saved.getType(), saved.getUserId());
+        return saved;
     }
 }

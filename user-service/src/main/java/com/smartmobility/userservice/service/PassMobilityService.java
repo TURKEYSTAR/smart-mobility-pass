@@ -28,7 +28,7 @@ public class PassMobilityService {
 
     private final MobilityPassRepository passRepository;
     private final UserRepository userRepository;
-    private final PassEventPublisher passEventPublisher; // ✅ injecté
+    private final PassEventPublisher passEventPublisher;
 
     public PassMobilityService(MobilityPassRepository passRepository,
                                UserRepository userRepository,
@@ -45,7 +45,6 @@ public class PassMobilityService {
         pass.setStatus(PassStatus.ACTIVE);
         pass.setCreatedAt(LocalDateTime.now());
         pass.setExpirationDate(LocalDateTime.now().plusMonths(DUREE_VALIDITE_MOIS));
-
         MobilityPass savedPass = passRepository.save(pass);
         user.setMobilityPass(savedPass);
         userRepository.save(user);
@@ -60,68 +59,63 @@ public class PassMobilityService {
         return mapToPassResponse(pass, userId);
     }
 
-    // ── Suspendre le pass — ADMIN uniquement ─────────────────────────────────
+    // ── Suspendre — ADMIN ─────────────────────────────────────────────────────
     public PassResponse suspendrePass(UUID userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException(userId));
-
         MobilityPass pass = user.getMobilityPass();
         verifierEtMettreAJourExpiration(pass);
 
-        if (pass.getStatus() == PassStatus.EXPIRE) {
-            throw new IllegalArgumentException(
-                    "Impossible de suspendre un pass expiré. Veuillez d'abord le renouveler.");
-        }
-        if (pass.getStatus() == PassStatus.SUSPENDU) {
+        if (pass.getStatus() == PassStatus.EXPIRE)
+            throw new IllegalArgumentException("Impossible de suspendre un pass expiré.");
+        if (pass.getStatus() == PassStatus.SUSPENDU)
             throw new IllegalArgumentException("Le pass est déjà suspendu.");
-        }
 
         pass.setStatus(PassStatus.SUSPENDU);
         passRepository.save(pass);
 
-        // ✅ Publier l'événement de suspension
         try {
             passEventPublisher.publishPassSuspended(
-                    userId,
-                    pass.getId(),
-                    pass.getPassNumber(),
-                    pass.getSolde()
-            );
+                    userId, pass.getId(), pass.getPassNumber(), pass.getSolde());
         } catch (Exception e) {
-            // RabbitMQ optionnel — ne doit pas faire échouer la suspension
-            log.warn("[PassMobilityService] RabbitMQ indisponible, PASS_SUSPENDED non publié : {}",
-                    e.getMessage());
+            log.warn("[PassMobilityService] RabbitMQ indisponible, PASS_SUSPENDED non publié : {}", e.getMessage());
         }
 
+        log.warn("[PassMobilityService] ⛔ Pass suspendu - userId={}, pass={}", userId, pass.getPassNumber());
         return mapToPassResponse(pass, userId);
     }
 
-    // ── Réactiver le pass — ADMIN uniquement ─────────────────────────────────
+    // ── Activer — ADMIN ───────────────────────────────────────────────────────
     public PassResponse activerPass(UUID userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException(userId));
-
         MobilityPass pass = user.getMobilityPass();
         verifierEtMettreAJourExpiration(pass);
 
-        if (pass.getStatus() == PassStatus.EXPIRE) {
-            throw new IllegalArgumentException(
-                    "Impossible de réactiver un pass expiré. Veuillez d'abord le renouveler.");
-        }
-        if (pass.getStatus() == PassStatus.ACTIVE) {
+        if (pass.getStatus() == PassStatus.EXPIRE)
+            throw new IllegalArgumentException("Impossible de réactiver un pass expiré.");
+        if (pass.getStatus() == PassStatus.ACTIVE)
             throw new IllegalArgumentException("Le pass est déjà actif.");
-        }
 
         pass.setStatus(PassStatus.ACTIVE);
         passRepository.save(pass);
+
+        // ✅ Notifier l'utilisateur que son pass est réactivé
+        try {
+            passEventPublisher.publishPassActivated(
+                    userId, pass.getId(), pass.getPassNumber(), pass.getSolde());
+        } catch (Exception e) {
+            log.warn("[PassMobilityService] RabbitMQ indisponible, PASS_ACTIVATED non publié : {}", e.getMessage());
+        }
+
+        log.info("[PassMobilityService] ✅ Pass activé - userId={}, pass={}", userId, pass.getPassNumber());
         return mapToPassResponse(pass, userId);
     }
 
-    // ── Renouveler le pass — USER (son propre) ou ADMIN ──────────────────────
+    // ── Renouveler ────────────────────────────────────────────────────────────
     public PassResponse renouvellerPass(UUID userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException(userId));
-
         MobilityPass pass = user.getMobilityPass();
         pass.setExpirationDate(LocalDateTime.now().plusMonths(DUREE_VALIDITE_MOIS));
         pass.setStatus(PassStatus.ACTIVE);
@@ -129,123 +123,67 @@ public class PassMobilityService {
         return mapToPassResponse(pass, userId);
     }
 
-    // ── Débiter le solde ──────────────────────────────────────────────────────
+    // ── Débiter ───────────────────────────────────────────────────────────────
     public PassResponse debiterSolde(UUID userId, UpdateSoldeRequest request) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException(userId));
-
         MobilityPass pass = user.getMobilityPass();
         verifierEtMettreAJourExpiration(pass);
 
-        if (pass.getStatus() == PassStatus.SUSPENDU) {
+        if (pass.getStatus() == PassStatus.SUSPENDU)
             throw new PassSuspenduException(pass.getPassNumber());
-        }
-        if (pass.getStatus() == PassStatus.EXPIRE) {
-            throw new IllegalArgumentException(
-                    "Le Mobility Pass " + pass.getPassNumber() + " est expiré.");
-        }
+        if (pass.getStatus() == PassStatus.EXPIRE)
+            throw new IllegalArgumentException("Le Mobility Pass " + pass.getPassNumber() + " est expiré.");
 
         BigDecimal soldeActuel = pass.getSolde();
-        BigDecimal montant     = request.getMontant();
-
-        if (soldeActuel.compareTo(montant) < 0) {
+        BigDecimal montant = request.getMontant();
+        if (soldeActuel.compareTo(montant) < 0)
             throw new SoldeInsuffisantException(soldeActuel, montant);
-        }
 
         pass.setSolde(soldeActuel.subtract(montant));
         passRepository.save(pass);
         return mapToPassResponse(pass, userId);
     }
 
-    // ── Recharger le solde ────────────────────────────────────────────────────
+    // ── Recharger ─────────────────────────────────────────────────────────────
     public PassResponse rechargerSolde(UUID userId, UpdateSoldeRequest request) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UserNotFoundException(userId));
-
         MobilityPass pass = user.getMobilityPass();
         verifierEtMettreAJourExpiration(pass);
 
-        // ✅ Bloquer la recharge si le pass est suspendu
+        // ✅ Bloquer + notifier si pass suspendu
         if (pass.getStatus() == PassStatus.SUSPENDU) {
+            try {
+                passEventPublisher.publishRechargeRefused(
+                        userId, pass.getId(), request.getMontant(), "PASS_SUSPENDED");
+            } catch (Exception e) {
+                log.warn("[PassMobilityService] RabbitMQ indisponible, RECHARGE_REFUSED non publié : {}", e.getMessage());
+            }
             throw new IllegalArgumentException(
                     "Impossible de recharger un pass suspendu. Contactez un administrateur.");
         }
+
+        // ✅ Bloquer + notifier si pass expiré
         if (pass.getStatus() == PassStatus.EXPIRE) {
+            try {
+                passEventPublisher.publishRechargeRefused(
+                        userId, pass.getId(), request.getMontant(), "PASS_EXPIRED");
+            } catch (Exception e) {
+                log.warn("[PassMobilityService] RabbitMQ indisponible, RECHARGE_REFUSED non publié : {}", e.getMessage());
+            }
             throw new IllegalArgumentException(
                     "Impossible de recharger un pass expiré. Veuillez d'abord le renouveler.");
         }
 
         pass.setSolde(pass.getSolde().add(request.getMontant()));
         passRepository.save(pass);
+        log.info("[PassMobilityService] ✅ Recharge effectuée - userId={}, montant={}, nouveau solde={}",
+                userId, request.getMontant(), pass.getSolde());
         return mapToPassResponse(pass, userId);
     }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    // ── Utilitaires internes ──────────────────────────────────────────────────
+    // ── Utilitaires ───────────────────────────────────────────────────────────
 
     private void verifierEtMettreAJourExpiration(MobilityPass pass) {
         if (pass.getStatus() != PassStatus.EXPIRE

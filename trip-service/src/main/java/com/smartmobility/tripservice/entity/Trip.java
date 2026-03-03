@@ -52,7 +52,7 @@ public class Trip {
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false)
     @Builder.Default
-    private TripStatus status = TripStatus.INITIATED;
+    private TripStatus status = TripStatus.IN_PROGRESS;
 
     @Column(name = "computed_fare", precision = 10, scale = 2)
     private BigDecimal computedFare;

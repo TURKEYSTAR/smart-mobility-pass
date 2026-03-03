@@ -48,7 +48,7 @@ public class PricingClientWrapper {
                     request.getPassId(),
                     t.getMessage(),
                     fallbackAmount,
-                    TransportType.valueOf(request.getTransportType().name())
+                    request.getTransportType()
             );
         } catch (Exception e) {
             log.warn("[PricingWrapper] RabbitMQ indisponible, PRICING_FALLBACK non publié : {}", e.getMessage());
