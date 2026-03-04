@@ -47,8 +47,9 @@ public class TripService {
     @Transactional
     public TripResponse initiateTrip(TripRequest request, UUID userId) {
         log.info("[TripService] ====== INITIATION TRAJET ======");
-        log.info("[TripService] UserId={}, Type={}, Distance={}km",
-                userId, request.getTransportType(), request.getDistanceKm());
+        log.info("[TripService] UserId={}, Type={}, Ligne={}, {} → {}",
+                userId, request.getTransportType(), request.getLigneId(),
+                request.getArretDepartId(), request.getArretArriveeId());
 
         // ÉTAPE 1 : Validation du pass
         PassValidationResponse passInfo = validatePass(userId);
@@ -62,21 +63,25 @@ public class TripService {
                 .userId(userId)
                 .passId(resolvedPassId)
                 .transportType(request.getTransportType())
-                .origin(request.getOrigin())
-                .destination(request.getDestination())
-                .distanceKm(request.getDistanceKm())
+                .ligneId(request.getLigneId())
+                .arretDepartId(request.getArretDepartId())
+                .arretDepartNom(request.getNomArretDepart())
+                .arretArriveeId(request.getArretArriveeId())
+                .arretArriveeNom(request.getNomArretArrivee())
                 .departureTime(request.getDepartureTime() != null
                         ? request.getDepartureTime() : LocalDateTime.now())
                 .status(TripStatus.IN_PROGRESS)
                 .build();
         trip = tripRepository.save(trip);
-        log.info("[TripService] Trajet créé ✅ - TripId={}", trip.getId());
+        log.info("[TripService] Trajet créé - TripId={}", trip.getId());
 
-        // ÉTAPE 4 : Calcul du tarif
+        // ÉTAPE 4 : Calcul du tarif par zones
         PricingRequest pricingRequest = PricingRequest.builder()
                 .tripId(trip.getId())
                 .transportType(trip.getTransportType())
-                .distanceKm(trip.getDistanceKm())
+                .ligneId(trip.getLigneId())
+                .arretDepartId(trip.getArretDepartId())
+                .arretArriveeId(trip.getArretArriveeId())
                 .departureTime(trip.getDepartureTime())
                 .passId(trip.getPassId())
                 .passTier(passInfo.getTier())
@@ -95,9 +100,13 @@ public class TripService {
 
         // ÉTAPE 7 : Notifications RabbitMQ
         try {
+            String label = trip.getTransportType().name()
+                    + (trip.getArretDepartNom() != null ? " — " + trip.getArretDepartNom() + " → " + trip.getArretArriveeNom() : "");
+
             eventPublisher.publishTripStarted(
                     trip.getId(), userId, resolvedPassId,
-                    trip.getOrigin(), trip.getDestination(),
+                    trip.getArretDepartNom() != null ? trip.getArretDepartNom() : trip.getArretDepartId(),
+                    trip.getArretArriveeNom() != null ? trip.getArretArriveeNom() : trip.getArretArriveeId(),
                     fareResult.getFinalAmount(), trip.getTransportType());
 
             if (fareResult.isFallbackUsed()) {
@@ -110,26 +119,24 @@ public class TripService {
             if (billing.getBalanceAfter() != null
                     && billing.getBalanceAfter().compareTo(LOW_BALANCE_THRESHOLD) < 0) {
                 eventPublisher.publishLowBalance(userId, resolvedPassId, billing.getBalanceAfter());
-                log.warn("[TripService] ⚠️ Solde faible : {} FCFA", billing.getBalanceAfter());
             }
 
-            // Vérifier si le plafond est atteint APRÈS ce trajet
             verifierEtNotifierPlafondAtteint(userId, resolvedPassId, fareResult.getFinalAmount());
 
         } catch (Exception e) {
             log.warn("[TripService] RabbitMQ indisponible : {}", e.getMessage());
         }
 
-        log.info("[TripService] ====== TRAJET INITIÉ ✅ — {} FCFA débités ======", fareResult.getFinalAmount());
+        log.info("[TripService] ====== TRAJET INITIÉ — {} FCFA débités ======", fareResult.getFinalAmount());
         return buildResponse(trip, fareResult, billing,
-                "Trajet démarré 🚌 — " + fareResult.getFinalAmount()
+                "Trajet démarré  — " + fareResult.getFinalAmount()
                         + " FCFA débités. Appuyez sur 'Terminer' à l'arrivée."
                         + (fareResult.isFallbackUsed()
                         ? " (tarif standard — Pricing Service indisponible)" : ""));
     }
 
     // ================================================================
-    // TERMINER — changement de statut, pas de 2ème débit
+    // TERMINER
     // ================================================================
 
     @Transactional
@@ -142,13 +149,11 @@ public class TripService {
         if (!trip.getUserId().equals(userId))
             throw new IllegalArgumentException("Ce trajet ne vous appartient pas.");
         if (trip.getStatus() != TripStatus.IN_PROGRESS)
-            throw new IllegalStateException(
-                    "Impossible de terminer ce trajet. Statut actuel : " + trip.getStatus());
+            throw new IllegalStateException("Impossible de terminer ce trajet. Statut : " + trip.getStatus());
 
         trip.setStatus(TripStatus.COMPLETED);
         trip.setArrivalTime(LocalDateTime.now());
         tripRepository.save(trip);
-        log.info("[TripService] Trajet COMPLETED ✅ - TripId={}", tripId);
 
         try {
             eventPublisher.publishTripCompleted(
@@ -160,15 +165,18 @@ public class TripService {
 
         return TripResponse.builder()
                 .tripId(trip.getId()).userId(trip.getUserId()).passId(trip.getPassId())
-                .transportType(trip.getTransportType()).origin(trip.getOrigin())
-                .destination(trip.getDestination()).distanceKm(trip.getDistanceKm())
+                .transportType(trip.getTransportType())
+                .ligneId(trip.getLigneId()).ligneNom(trip.getLigneNom())
+                .arretDepartId(trip.getArretDepartId()).arretDepartNom(trip.getArretDepartNom())
+                .arretArriveeId(trip.getArretArriveeId()).arretArriveeNom(trip.getArretArriveeNom())
+                .zoneDepart(trip.getZoneDepart()).zoneArrivee(trip.getZoneArrivee())
                 .status(trip.getStatus()).computedFare(trip.getComputedFare())
-                .createdAt(trip.getCreatedAt()).message("Trajet terminé ✅ — Bon voyage !")
+                .createdAt(trip.getCreatedAt()).message("Trajet terminé — Bon voyage !")
                 .build();
     }
 
     // ================================================================
-    // ANNULER — CANCELLED, pas de remboursement
+    // ANNULER
     // ================================================================
 
     @Transactional
@@ -179,17 +187,16 @@ public class TripService {
         if (!trip.getUserId().equals(userId))
             throw new IllegalArgumentException("Ce trajet ne vous appartient pas.");
         if (trip.getStatus() != TripStatus.IN_PROGRESS)
-            throw new IllegalStateException(
-                    "Seul un trajet EN COURS peut être annulé. Statut : " + trip.getStatus());
+            throw new IllegalStateException("Seul un trajet EN COURS peut être annulé. Statut : " + trip.getStatus());
 
         trip.setStatus(TripStatus.CANCELLED);
         tripRepository.save(trip);
-        log.info("[TripService] Trajet CANCELLED - TripId={} (pas de remboursement)", tripId);
 
         return TripResponse.builder()
                 .tripId(trip.getId()).userId(trip.getUserId()).passId(trip.getPassId())
-                .transportType(trip.getTransportType()).origin(trip.getOrigin())
-                .destination(trip.getDestination()).distanceKm(trip.getDistanceKm())
+                .transportType(trip.getTransportType())
+                .ligneId(trip.getLigneId()).arretDepartNom(trip.getArretDepartNom())
+                .arretArriveeNom(trip.getArretArriveeNom())
                 .status(trip.getStatus()).computedFare(trip.getComputedFare())
                 .createdAt(trip.getCreatedAt())
                 .message("Trajet annulé. Le montant débité ne sera pas remboursé.")
@@ -202,10 +209,8 @@ public class TripService {
 
     private void verifierPlafondJournalier(UUID userId, UUID passId) {
         BigDecimal depenseAujourdhui = getTotalDepenseAujourdhui(userId);
-
         if (depenseAujourdhui.compareTo(dailyLimit) >= 0) {
-            log.warn("[TripService] 🚫 Plafond journalier déjà atteint - userId={}, dépensé={} FCFA",
-                    userId, depenseAujourdhui);
+            log.warn("[TripService] Plafond atteint - userId={}, dépensé={} FCFA", userId, depenseAujourdhui);
             try {
                 eventPublisher.publishDailyLimitReached(userId, passId, dailyLimit, depenseAujourdhui);
             } catch (Exception e) {
@@ -220,8 +225,6 @@ public class TripService {
     private void verifierEtNotifierPlafondAtteint(UUID userId, UUID passId, BigDecimal dernierMontant) {
         BigDecimal totalAujourdhui = getTotalDepenseAujourdhui(userId);
         if (totalAujourdhui.compareTo(dailyLimit) >= 0) {
-            log.warn("[TripService] 🚫 Plafond journalier atteint après trajet - userId={}, total={} FCFA",
-                    userId, totalAujourdhui);
             eventPublisher.publishDailyLimitReached(userId, passId, dailyLimit, totalAujourdhui);
         }
     }
@@ -229,7 +232,6 @@ public class TripService {
     private BigDecimal getTotalDepenseAujourdhui(UUID userId) {
         LocalDateTime debutJournee = LocalDate.now().atStartOfDay();
         LocalDateTime finJournee   = debutJournee.plusDays(1);
-
         return tripRepository
                 .findByUserIdAndCreatedAtBetween(userId, debutJournee, finJournee)
                 .stream()
@@ -248,13 +250,11 @@ public class TripService {
                 userId, userId.toString(), "USER");
 
         if (!"ACTIVE".equals(passInfo.getStatus()))
-            throw new PassInactiveException("Pass non valide. Statut actuel : " + passInfo.getStatus());
+            throw new PassInactiveException("Pass non valide. Statut : " + passInfo.getStatus());
 
         if (passInfo.getBalance() == null || passInfo.getBalance().compareTo(MINIMUM_BALANCE) < 0) {
             try {
                 eventPublisher.publishInsufficientBalance(userId, passInfo.getPassId(), passInfo.getBalance());
-                log.warn("[TripService] ⚠️ Solde insuffisant - userId={}, solde={} FCFA",
-                        userId, passInfo.getBalance());
             } catch (Exception e) {
                 log.warn("[TripService] RabbitMQ indisponible : {}", e.getMessage());
             }
@@ -263,7 +263,7 @@ public class TripService {
                             + " FCFA. Minimum requis : " + MINIMUM_BALANCE + " FCFA.");
         }
 
-        log.info("[TripService] Pass valide ✅ - Solde={} FCFA", passInfo.getBalance());
+        log.info("[TripService] Pass valide - Solde={} FCFA", passInfo.getBalance());
         return passInfo;
     }
 
@@ -272,14 +272,17 @@ public class TripService {
     // ================================================================
 
     private BillingResponse debitAccount(Trip trip, BigDecimal amount) {
+        String description = trip.getTransportType().name()
+                + (trip.getArretDepartNom() != null
+                ? " : " + trip.getArretDepartNom() + " → " + trip.getArretArriveeNom()
+                : " : " + trip.getArretDepartId() + " → " + trip.getArretArriveeId());
+
         BillingRequest billingRequest = BillingRequest.builder()
-                .userId(trip.getUserId()).tripId(trip.getId()).montant(amount)
-                .description("Trajet " + trip.getTransportType()
-                        + " : " + trip.getOrigin() + " → " + trip.getDestination())
+                .userId(trip.getUserId()).tripId(trip.getId())
+                .montant(amount).description(description)
                 .build();
         BillingResponse billing = billingServiceClient.debitAccount(billingRequest, "trip-service");
-        log.info("[TripService] Débit ✅ - TransactionId={}, Solde après={} FCFA",
-                billing.getTransactionId(), billing.getBalanceAfter());
+        log.info("[TripService] Débit - Solde après={} FCFA", billing.getBalanceAfter());
         return billing;
     }
 
@@ -291,11 +294,15 @@ public class TripService {
                                        BillingResponse billing, String message) {
         return TripResponse.builder()
                 .tripId(trip.getId()).userId(trip.getUserId()).passId(trip.getPassId())
-                .transportType(trip.getTransportType()).origin(trip.getOrigin())
-                .destination(trip.getDestination()).distanceKm(trip.getDistanceKm())
-                .status(trip.getStatus()).baseAmount(fare.getBaseAmount())
-                .discountAmount(fare.getDiscountAmount()).computedFare(fare.getFinalAmount())
-                .balanceAfter(billing.getBalanceAfter()).transactionId(billing.getTransactionId())
+                .transportType(trip.getTransportType())
+                .ligneId(trip.getLigneId()).ligneNom(trip.getLigneNom())
+                .arretDepartId(trip.getArretDepartId()).arretDepartNom(trip.getArretDepartNom())
+                .arretArriveeId(trip.getArretArriveeId()).arretArriveeNom(trip.getArretArriveeNom())
+                .zoneDepart(trip.getZoneDepart()).zoneArrivee(trip.getZoneArrivee())
+                .status(trip.getStatus())
+                .baseAmount(fare.getBaseAmount()).discountAmount(fare.getDiscountAmount())
+                .computedFare(fare.getFinalAmount()).balanceAfter(billing.getBalanceAfter())
+                .transactionId(billing.getTransactionId())
                 .appliedDiscounts(fare.getAppliedDiscounts()).fallbackUsed(fare.isFallbackUsed())
                 .createdAt(trip.getCreatedAt()).message(message)
                 .build();

@@ -27,6 +27,20 @@ public class GlobalExceptionHandler {
         return buildResponse(HttpStatus.PAYMENT_REQUIRED, ex.getMessage());
     }
 
+    // Plafond journalier, trajet déjà complété, statut invalide...
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<Map<String, Object>> handleIllegalState(IllegalStateException ex) {
+        log.warn("[TripService] Règle métier : {}", ex.getMessage());
+        return buildResponse(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    // Trajet introuvable, trajet n'appartient pas à l'utilisateur...
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<Map<String, Object>> handleIllegalArgument(IllegalArgumentException ex) {
+        log.warn("[TripService] Argument invalide : {}", ex.getMessage());
+        return buildResponse(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Map<String, Object>> handleValidation(MethodArgumentNotValidException ex) {
         Map<String, Object> errors = new HashMap<>();

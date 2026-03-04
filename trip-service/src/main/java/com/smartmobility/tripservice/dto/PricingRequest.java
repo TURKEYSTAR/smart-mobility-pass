@@ -17,7 +17,12 @@ public class PricingRequest {
 
     private UUID tripId;
     private TransportType transportType;
-    private Double distanceKm;
+
+    // Nouveau — remplace distanceKm
+    private String ligneId;
+    private String arretDepartId;
+    private String arretArriveeId;
+
     private LocalDateTime departureTime;
     private UUID passId;
     private String passTier;

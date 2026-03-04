@@ -3,7 +3,6 @@ package com.smartmobility.tripservice.dto;
 import com.smartmobility.tripservice.entity.TransportType;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Positive;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -24,15 +23,18 @@ public class TripRequest {
     @NotNull(message = "Le type de transport est requis")
     private TransportType transportType;
 
-    @NotBlank(message = "L'origine est requise")
-    private String origin;
+    @NotBlank(message = "La ligne est requise")
+    private String ligneId;          // ex: "BRT_B1", "TER_L1", "BUS_L1"
 
-    @NotBlank(message = "La destination est requise")
-    private String destination;
+    @NotBlank(message = "L'arrêt de départ est requis")
+    private String arretDepartId;    // ex: "BRT_PETERSEN"
 
-    @NotNull(message = "La distance est requise")
-    @Positive(message = "La distance doit être positive")
-    private Double distanceKm;
+    @NotBlank(message = "L'arrêt d'arrivée est requis")
+    private String arretArriveeId;   // ex: "BRT_PARCELLES"
+
+    // Noms lisibles — optionnels, renseignés par le frontend
+    private String nomArretDepart;
+    private String nomArretArrivee;
 
     private LocalDateTime departureTime;
 }

@@ -19,11 +19,15 @@ import java.util.Map;
 public class PricingClientWrapper {
 
     private final PricingServiceClient pricingServiceClient;
-    private final TripEventPublisher eventPublisher;  // ✅ injecté
+    private final TripEventPublisher eventPublisher;
 
+    /**
+     * Tarifs de fallback par type de transport.
+     * On prend le tarif minimum de chaque type (même zone).
+     */
     private static final Map<TransportType, BigDecimal> FALLBACK_FARES = Map.of(
-            TransportType.BUS_CLASSIQUE, BigDecimal.valueOf(200),
-            TransportType.BRT,           BigDecimal.valueOf(350),
+            TransportType.BUS_CLASSIQUE, BigDecimal.valueOf(150),
+            TransportType.BRT,           BigDecimal.valueOf(400),
             TransportType.TER,           BigDecimal.valueOf(500)
     );
 
@@ -61,7 +65,7 @@ public class PricingClientWrapper {
                 .appliedDiscounts(Collections.emptyList())
                 .cappedByDailyLimit(false)
                 .fallbackUsed(true)
-                .note("Tarif standard appliqué (Pricing Service indisponible)")
+                .note("Tarif minimum appliqué — Pricing Service indisponible (" + request.getTransportType() + ")")
                 .build();
     }
 }

@@ -22,9 +22,18 @@ public class TripResponse {
     private UUID userId;
     private UUID passId;
     private TransportType transportType;
-    private String origin;
-    private String destination;
-    private Double distanceKm;
+
+    // Ligne & arrêts
+    private String ligneId;
+    private String ligneNom;
+    private String arretDepartId;
+    private String arretDepartNom;
+    private String arretArriveeId;
+    private String arretArriveeNom;
+    private Integer zoneDepart;
+    private Integer zoneArrivee;
+
+    // Tarif
     private TripStatus status;
     private BigDecimal baseAmount;
     private BigDecimal discountAmount;
@@ -33,6 +42,7 @@ public class TripResponse {
     private UUID transactionId;
     private List<String> appliedDiscounts;
     private boolean fallbackUsed;
+
     private LocalDateTime createdAt;
     private String message;
 }

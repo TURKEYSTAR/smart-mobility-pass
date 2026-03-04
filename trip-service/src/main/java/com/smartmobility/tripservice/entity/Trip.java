@@ -34,11 +34,33 @@ public class Trip {
     @Column(name = "transport_type", nullable = false)
     private TransportType transportType;
 
-    @Column(name = "origin", nullable = false, length = 255)
-    private String origin;
+    // ── Nouvelle structure zone/ligne ──────────────────────────────
 
-    @Column(name = "destination", nullable = false, length = 255)
-    private String destination;
+    @Column(name = "ligne_id", nullable = false, length = 20)
+    private String ligneId;          // ex: "BRT_B1"
+
+    @Column(name = "ligne_nom", length = 100)
+    private String ligneNom;         // ex: "B1 — Omnibus"
+
+    @Column(name = "arret_depart_id", nullable = false, length = 30)
+    private String arretDepartId;    // ex: "BRT_PETERSEN"
+
+    @Column(name = "arret_depart_nom", length = 100)
+    private String arretDepartNom;   // ex: "Papa Gueye Fall (Petersen)"
+
+    @Column(name = "arret_arrivee_id", nullable = false, length = 30)
+    private String arretArriveeId;
+
+    @Column(name = "arret_arrivee_nom", length = 100)
+    private String arretArriveeNom;
+
+    @Column(name = "zone_depart")
+    private Integer zoneDepart;      // 1, 2 ou 3
+
+    @Column(name = "zone_arrivee")
+    private Integer zoneArrivee;
+
+    // ── Temps ──────────────────────────────────────────────────────
 
     @Column(name = "departure_time")
     private LocalDateTime departureTime;
@@ -46,8 +68,7 @@ public class Trip {
     @Column(name = "arrival_time")
     private LocalDateTime arrivalTime;
 
-    @Column(name = "distance_km")
-    private Double distanceKm;
+    // ── Statut & tarif ────────────────────────────────────────────
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false)
@@ -65,19 +86,22 @@ public class Trip {
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
-    public long calculateDuration() {
-        if (departureTime != null && arrivalTime != null) {
-            return java.time.Duration.between(departureTime, arrivalTime).toMinutes();
-        }
-        return 0;
+    /**
+     * Retourne un label lisible pour les notifications.
+     * ex: "BRT B1 — Petersen → Parcelles"
+     */
+    public String getLabel() {
+        String depart  = arretDepartNom  != null ? arretDepartNom  : arretDepartId;
+        String arrivee = arretArriveeNom != null ? arretArriveeNom : arretArriveeId;
+        return transportType.name() + " — " + depart + " → " + arrivee;
     }
 
     public boolean isValid() {
         return userId != null
                 && passId != null
                 && transportType != null
-                && origin != null && !origin.isBlank()
-                && destination != null && !destination.isBlank()
-                && distanceKm != null && distanceKm > 0;
+                && ligneId != null && !ligneId.isBlank()
+                && arretDepartId != null && !arretDepartId.isBlank()
+                && arretArriveeId != null && !arretArriveeId.isBlank();
     }
 }

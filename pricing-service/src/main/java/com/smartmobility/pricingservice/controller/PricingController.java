@@ -4,6 +4,12 @@ import com.smartmobility.pricingservice.dto.FareResult;
 import com.smartmobility.pricingservice.dto.PricingRequest;
 import com.smartmobility.pricingservice.entity.FareCalculation;
 import com.smartmobility.pricingservice.entity.PricingRule;
+import com.smartmobility.pricingservice.entity.TransportType;
+import com.smartmobility.pricingservice.lignes.Arret;
+import com.smartmobility.pricingservice.lignes.Ligne;
+import com.smartmobility.pricingservice.lignes.LigneRepository;
+import com.smartmobility.pricingservice.lignes.TarifInfo;
+import com.smartmobility.pricingservice.lignes.ZoneTarifService;
 import com.smartmobility.pricingservice.service.FareCalculatorService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -14,15 +20,6 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.UUID;
 
-/**
- * PricingController - API REST du Pricing & Discount Service
- *
- * Routes:
- * POST /pricing/calculate              → Calcule le tarif d'un trajet
- * GET  /pricing/rules                  → Liste toutes les règles tarifaires
- * GET  /pricing/calculation/{tripId}   → Calcul tarifaire d'un trajet spécifique
- * GET  /pricing/health                 → Health check
- */
 @RestController
 @RequestMapping("/pricing")
 @RequiredArgsConstructor
@@ -30,51 +27,89 @@ import java.util.UUID;
 public class PricingController {
 
     private final FareCalculatorService fareCalculatorService;
+    private final LigneRepository ligneRepository;
+    private final ZoneTarifService zoneTarifService;
 
     /**
      * POST /pricing/calculate
-     * Calcule le tarif complet avec toutes les règles métier
-     * Appelé par le Trip Management Service
+     * Calcule le tarif par zones (appelé par Trip Service)
      */
     @PostMapping("/calculate")
     public ResponseEntity<FareResult> calculateFare(@Valid @RequestBody PricingRequest request) {
-        log.info("[PricingController] POST /pricing/calculate - TripId={}, Type={}, Distance={}km",
-                request.getTripId(), request.getTransportType(), request.getDistanceKm());
+        log.info("[PricingController] POST /pricing/calculate - TripId={}, Type={}, Ligne={}",
+                request.getTripId(), request.getTransportType(), request.getLigneId());
+        return ResponseEntity.ok(fareCalculatorService.calculateFare(request));
+    }
 
-        FareResult result = fareCalculatorService.calculateFare(request);
-        return ResponseEntity.ok(result);
+    /**
+     * GET /pricing/lignes/{transportType}
+     * Retourne toutes les lignes d'un type de transport.
+     * Appelé par le frontend pour peupler la liste déroulante des lignes.
+     * Ex: GET /pricing/lignes/BRT → [B1, B2, B3]
+     */
+    @GetMapping("/lignes/{transportType}")
+    public ResponseEntity<List<Ligne>> getLignes(@PathVariable String transportType) {
+        log.info("[PricingController] GET /pricing/lignes/{}", transportType);
+        TransportType type = TransportType.valueOf(transportType.toUpperCase());
+        return ResponseEntity.ok(ligneRepository.getLignesByType(type));
+    }
+
+    /**
+     * GET /pricing/lignes/{ligneId}/arrets
+     * Retourne tous les arrêts d'une ligne.
+     * Appelé par le frontend après sélection de la ligne.
+     * Ex: GET /pricing/lignes/BRT_B1/arrets → [Petersen, Nation, ...]
+     */
+    @GetMapping("/lignes/{ligneId}/arrets")
+    public ResponseEntity<List<Arret>> getArrets(@PathVariable String ligneId) {
+        log.info("[PricingController] GET /pricing/lignes/{}/arrets", ligneId);
+        return ligneRepository.getLigneById(ligneId)
+                .map(l -> ResponseEntity.ok(l.getArrets()))
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    /**
+     * GET /pricing/tarif?transportType=BRT&ligneId=BRT_B1&arretDepartId=BRT_PETERSEN&arretArriveeId=BRT_PARCELLES
+     * Retourne le tarif estimé pour un trajet donné (sans créer de calcul).
+     * Utilisé par le frontend pour afficher le prix avant de démarrer.
+     */
+    @GetMapping("/tarif")
+    public ResponseEntity<TarifInfo> getTarif(
+            @RequestParam String transportType,
+            @RequestParam String ligneId,
+            @RequestParam String arretDepartId,
+            @RequestParam String arretArriveeId) {
+
+        log.info("[PricingController] GET /pricing/tarif - {} | {} | {} → {}",
+                transportType, ligneId, arretDepartId, arretArriveeId);
+
+        TransportType type = TransportType.valueOf(transportType.toUpperCase());
+        TarifInfo info = zoneTarifService.getTarifInfo(type, ligneId, arretDepartId, arretArriveeId);
+        return ResponseEntity.ok(info);
     }
 
     /**
      * GET /pricing/rules
-     * Retourne toutes les règles tarifaires actives
-     * Utilisé pour la consultation et la documentation
      */
     @GetMapping("/rules")
     public ResponseEntity<List<PricingRule>> getAllRules() {
-        log.info("[PricingController] GET /pricing/rules");
         return ResponseEntity.ok(fareCalculatorService.getAllRules());
     }
 
     /**
      * GET /pricing/calculation/{tripId}
-     * Récupère le détail d'un calcul tarifaire par tripId
      */
     @GetMapping("/calculation/{tripId}")
     public ResponseEntity<FareCalculation> getCalculationByTrip(@PathVariable UUID tripId) {
-        log.info("[PricingController] GET /pricing/calculation/{}", tripId);
         FareCalculation calc = fareCalculatorService.getCalculationByTripId(tripId);
-        return calc != null
-                ? ResponseEntity.ok(calc)
-                : ResponseEntity.notFound().build();
+        return calc != null ? ResponseEntity.ok(calc) : ResponseEntity.notFound().build();
     }
 
     /**
      * GET /pricing/health
-     * Endpoint de santé - également utilisé par Resilience4J pour le test HALF-OPEN
      */
     @GetMapping("/health")
     public ResponseEntity<String> health() {
-        return ResponseEntity.ok("Pricing & Discount Service ✅ opérationnel - Port 8083");
+        return ResponseEntity.ok("Pricing Service ✅ opérationnel — tarification par zones");
     }
 }

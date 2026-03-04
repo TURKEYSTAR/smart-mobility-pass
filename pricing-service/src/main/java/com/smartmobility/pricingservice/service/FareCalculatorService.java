@@ -4,9 +4,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.smartmobility.pricingservice.client.BillingClientWrapper;
 import com.smartmobility.pricingservice.dto.FareResult;
 import com.smartmobility.pricingservice.dto.PricingRequest;
-import com.smartmobility.pricingservice.entity.*;
-import com.smartmobility.pricingservice.exception.PricingRuleNotFoundException;
-import com.smartmobility.pricingservice.repository.DiscountPolicyRepository;
+import com.smartmobility.pricingservice.entity.FareCalculation;
+import com.smartmobility.pricingservice.entity.PricingRule;
+import com.smartmobility.pricingservice.entity.TransportType;
+import com.smartmobility.pricingservice.lignes.ZoneTarifService;
 import com.smartmobility.pricingservice.repository.FareCalculationRepository;
 import com.smartmobility.pricingservice.repository.PricingRuleRepository;
 import lombok.RequiredArgsConstructor;
@@ -27,13 +28,13 @@ import java.util.UUID;
 @Slf4j
 public class FareCalculatorService {
 
-    private final PricingRuleRepository pricingRuleRepository;
-    private final DiscountPolicyRepository discountPolicyRepository;
     private final FareCalculationRepository fareCalculationRepository;
+    private final PricingRuleRepository pricingRuleRepository;
     private final BillingClientWrapper billingClientWrapper;
+    private final ZoneTarifService zoneTarifService;
     private final ObjectMapper objectMapper;
 
-    @Value("${pricing.daily-cap:2000}")
+    @Value("${pricing.daily-cap:5000}")
     private BigDecimal dailyCap;
 
     @Value("${pricing.off-peak.start-hour:22}")
@@ -57,20 +58,21 @@ public class FareCalculatorService {
 
     @Transactional
     public FareResult calculateFare(PricingRequest request) {
-        log.info("[FareCalculator] ====== CALCUL TARIFAIRE ======");
-        log.info("[FareCalculator] TripId={}, Type={}, Distance={}km, Tier={}, TotalTrajets={}",
+        log.info("[FareCalculator] ====== CALCUL TARIFAIRE PAR ZONES ======");
+        log.info("[FareCalculator] TripId={}, Type={}, Ligne={}, {} → {}",
                 request.getTripId(), request.getTransportType(),
-                request.getDistanceKm(), request.getPassTier(), request.getTotalTrips());
+                request.getLigneId(), request.getArretDepartId(), request.getArretArriveeId());
 
-        // ---- ÉTAPE 1 : Récupération des règles tarifaires ----
-        PricingRule rule = getPricingRule(request);
+        // ---- ÉTAPE 1 : Calcul du tarif de base par zones ----
+        BigDecimal baseAmount = zoneTarifService.calculerTarif(
+                request.getTransportType(),
+                request.getLigneId(),
+                request.getArretDepartId(),
+                request.getArretArriveeId()
+        );
+        log.info("[FareCalculator] Tarif de base (par zones) : {} FCFA", baseAmount);
 
-        // ---- ÉTAPE 2 : Calcul du prix de base ----
-        BigDecimal baseAmount = calculateBasePrice(rule, request.getDistanceKm());
-        log.info("[FareCalculator] Prix de base: {} FCFA ({} + {} × {}km)",
-                baseAmount, rule.getBasePrice(), rule.getPricePerKm(), request.getDistanceKm());
-
-        // ---- ÉTAPE 3 : Application des réductions ----
+        // ---- ÉTAPE 2 : Application des réductions ----
         List<String> appliedDiscounts = new ArrayList<>();
         BigDecimal currentAmount = baseAmount;
 
@@ -80,13 +82,13 @@ public class FareCalculatorService {
 
         BigDecimal totalDiscount = baseAmount.subtract(currentAmount);
 
-        // ---- ÉTAPE 4 : Vérification du plafond journalier (avec circuit breaker) ----
+        // ---- ÉTAPE 3 : Vérification du plafond journalier ----
         boolean capped = false;
         BigDecimal finalAmount = currentAmount;
 
-        BigDecimal dailyTotal = getDailyTotalSafe(request.getPassId());
+        BigDecimal dailyTotal = billingClientWrapper.getDailyTotal(request.getPassId());
         if (dailyTotal != null) {
-            log.info("[FareCalculator] Total journalier actuel: {} FCFA (plafond: {} FCFA)",
+            log.info("[FareCalculator] Total journalier actuel : {} FCFA (plafond : {} FCFA)",
                     dailyTotal, dailyCap);
 
             if (dailyTotal.add(currentAmount).compareTo(dailyCap) > 0) {
@@ -95,23 +97,21 @@ public class FareCalculatorService {
                     finalAmount = remaining;
                     capped = true;
                     appliedDiscounts.add("PLAFOND JOURNALIER appliqué (max " + dailyCap + " FCFA/jour)");
-                    log.info("[FareCalculator] Plafond atteint! {} FCFA → {} FCFA", currentAmount, finalAmount);
+                    log.info("[FareCalculator] Plafond atteint ! {} FCFA → {} FCFA", currentAmount, finalAmount);
                 } else {
                     finalAmount = BigDecimal.ZERO;
                     capped = true;
-                    appliedDiscounts.add("PLAFOND JOURNALIER atteint - trajet sans frais");
-                    log.info("[FareCalculator] Plafond déjà atteint. Trajet gratuit!");
+                    appliedDiscounts.add("PLAFOND JOURNALIER atteint — trajet sans frais");
                 }
             }
         } else {
-            log.warn("[FareCalculator] Billing-service indisponible, plafond journalier non vérifié");
+            log.warn("[FareCalculator] Billing-service indisponible, plafond non vérifié");
         }
 
-        // Montant final jamais négatif
         finalAmount = finalAmount.max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
         totalDiscount = baseAmount.subtract(finalAmount).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
 
-        // ---- ÉTAPE 5 : Sauvegarde ----
+        // ---- ÉTAPE 4 : Sauvegarde ----
         saveCalculation(request, baseAmount, totalDiscount, finalAmount, appliedDiscounts, capped);
 
         log.info("[FareCalculator] === RÉSULTAT === Base:{} | Réduction:{} | Final:{} FCFA",
@@ -129,54 +129,7 @@ public class FareCalculatorService {
     }
 
     // ================================================================
-    // Appel vers billing-service via wrapper (Circuit Breaker dans BillingClientWrapper)
-    // ================================================================
-
-    private BigDecimal getDailyTotalSafe(UUID passId) {
-        return billingClientWrapper.getDailyTotal(passId);
-    }
-
-    // ================================================================
-    // ÉTAPE 1 : Règles tarifaires
-    // ================================================================
-
-    private PricingRule getPricingRule(PricingRequest request) {
-        return pricingRuleRepository
-                .findByTransportTypeAndActiveTrue(request.getTransportType())
-                .orElseGet(() -> {
-                    log.warn("[FareCalculator] Règle non trouvée pour {}, valeurs par défaut",
-                            request.getTransportType());
-                    return getDefaultRule(request.getTransportType());
-                });
-    }
-
-    private PricingRule getDefaultRule(TransportType type) {
-        return switch (type) {
-            case BUS_CLASSIQUE -> PricingRule.builder()
-                    .transportType(type).basePrice(BigDecimal.valueOf(150))
-                    .pricePerKm(BigDecimal.valueOf(25)).build();
-            case BRT -> PricingRule.builder()
-                    .transportType(type).basePrice(BigDecimal.valueOf(200))
-                    .pricePerKm(BigDecimal.valueOf(35)).build();
-            case TER -> PricingRule.builder()
-                    .transportType(type).basePrice(BigDecimal.valueOf(300))
-                    .pricePerKm(BigDecimal.valueOf(50)).build();
-        };
-    }
-
-    // ================================================================
-    // ÉTAPE 2 : Prix de base = basePrice + (distance × pricePerKm)
-    // ================================================================
-
-    private BigDecimal calculateBasePrice(PricingRule rule, Double distanceKm) {
-        BigDecimal distance = BigDecimal.valueOf(distanceKm);
-        return rule.getBasePrice()
-                .add(rule.getPricePerKm().multiply(distance))
-                .setScale(2, RoundingMode.HALF_UP);
-    }
-
-    // ================================================================
-    // ÉTAPE 3a : Heures creuses (22h–6h) → -20%
+    // RÉDUCTIONS
     // ================================================================
 
     private BigDecimal applyOffPeakDiscount(BigDecimal amount, LocalDateTime departureTime,
@@ -188,15 +141,11 @@ public class FareCalculatorService {
             BigDecimal discount = amount.multiply(offPeakDiscountPercent)
                     .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
             appliedDiscounts.add("HEURES CREUSES (" + hour + "h) -" + offPeakDiscountPercent + "%");
-            log.info("[FareCalculator] Heures creuses: -{} FCFA", discount);
+            log.info("[FareCalculator] Heures creuses : -{} FCFA", discount);
             return amount.subtract(discount);
         }
         return amount;
     }
-
-    // ================================================================
-    // ÉTAPE 3b : Réduction tier (SILVER -10%, GOLD -15%, PLATINUM -30%)
-    // ================================================================
 
     private BigDecimal applyTierDiscount(BigDecimal amount, String passTier,
                                          List<String> appliedDiscounts) {
@@ -213,15 +162,10 @@ public class FareCalculatorService {
             BigDecimal discount = amount.multiply(tierDiscountPercent)
                     .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
             appliedDiscounts.add("TIER " + passTier.toUpperCase() + " -" + tierDiscountPercent + "%");
-            log.info("[FareCalculator] Tier {}: -{} FCFA", passTier, discount);
             return amount.subtract(discount);
         }
         return amount;
     }
-
-    // ================================================================
-    // ÉTAPE 3c : Fidélité (>= 10 trajets) → -5%
-    // ================================================================
 
     private BigDecimal applyLoyaltyDiscount(BigDecimal amount, int totalTrips,
                                             List<String> appliedDiscounts) {
@@ -229,14 +173,13 @@ public class FareCalculatorService {
             BigDecimal discount = amount.multiply(loyaltyDiscountPercent)
                     .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
             appliedDiscounts.add("FIDÉLITÉ (" + totalTrips + " trajets) -" + loyaltyDiscountPercent + "%");
-            log.info("[FareCalculator] Fidélité: -{} FCFA", discount);
             return amount.subtract(discount);
         }
         return amount;
     }
 
     // ================================================================
-    // Sauvegarde historique
+    // SAUVEGARDE
     // ================================================================
 
     private void saveCalculation(PricingRequest request, BigDecimal base,
@@ -244,6 +187,7 @@ public class FareCalculatorService {
                                  List<String> discounts, boolean capped) {
         try {
             String discountsJson = objectMapper.writeValueAsString(discounts);
+            // On stocke la ligne + arrêts dans le champ note de FareCalculation
             fareCalculationRepository.save(FareCalculation.builder()
                     .tripId(request.getTripId())
                     .passId(request.getPassId())
@@ -256,13 +200,13 @@ public class FareCalculatorService {
                     .build());
             log.info("[FareCalculator] Calcul sauvegardé ✅");
         } catch (Exception e) {
-            log.error("[FareCalculator] Erreur sauvegarde: {}", e.getMessage());
+            log.error("[FareCalculator] Erreur sauvegarde : {}", e.getMessage());
         }
     }
 
     private String buildNote(List<String> discounts, boolean capped) {
-        if (discounts.isEmpty()) return "Tarif standard appliqué (aucune réduction)";
-        StringBuilder note = new StringBuilder("Réductions: ").append(String.join(", ", discounts));
+        if (discounts.isEmpty()) return "Tarif par zone — aucune réduction";
+        StringBuilder note = new StringBuilder("Réductions : ").append(String.join(", ", discounts));
         if (capped) note.append(" | Plafond journalier atteint");
         return note.toString();
     }
