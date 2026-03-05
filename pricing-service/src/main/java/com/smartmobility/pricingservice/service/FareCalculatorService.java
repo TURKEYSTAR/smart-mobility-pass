@@ -71,6 +71,8 @@ public class FareCalculatorService {
                 request.getArretArriveeId()
         );
         log.info("[FareCalculator] Tarif de base (par zones) : {} FCFA", baseAmount);
+        log.info("[FareCalculator] passTier={} | totalTrips={}",
+                request.getPassTier(), request.getTotalTrips());
 
         // ---- ÉTAPE 2 : Application des réductions ----
         List<String> appliedDiscounts = new ArrayList<>();
@@ -198,7 +200,7 @@ public class FareCalculatorService {
                     .cappedByDailyLimit(capped)
                     .fallbackUsed(false)
                     .build());
-            log.info("[FareCalculator] Calcul sauvegardé ✅");
+            log.info("[FareCalculator] Calcul sauvegardé");
         } catch (Exception e) {
             log.error("[FareCalculator] Erreur sauvegarde : {}", e.getMessage());
         }

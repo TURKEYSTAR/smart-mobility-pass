@@ -34,7 +34,7 @@ public class TripService {
     private final BillingServiceClient billingServiceClient;
     private final TripEventPublisher eventPublisher;
 
-    private static final BigDecimal MINIMUM_BALANCE       = BigDecimal.valueOf(100);
+    private static final BigDecimal MINIMUM_BALANCE = BigDecimal.valueOf(100);
     private static final BigDecimal LOW_BALANCE_THRESHOLD = BigDecimal.valueOf(500);
 
     @Value("${trip.daily-limit:5000}")
@@ -76,6 +76,11 @@ public class TripService {
         log.info("[TripService] Trajet créé - TripId={}", trip.getId());
 
         // ÉTAPE 4 : Calcul du tarif par zones
+        int totalTrips = countCompletedTrips(userId);
+        String passTier = passInfo.getTier() != null ? passInfo.getTier() : "STANDARD";
+
+        log.info("[TripService] userId={} | tier={} | totalTrips={}", userId, passTier, totalTrips);
+
         PricingRequest pricingRequest = PricingRequest.builder()
                 .tripId(trip.getId())
                 .transportType(trip.getTransportType())
@@ -84,8 +89,8 @@ public class TripService {
                 .arretArriveeId(trip.getArretArriveeId())
                 .departureTime(trip.getDepartureTime())
                 .passId(trip.getPassId())
-                .passTier(passInfo.getTier())
-                .totalTrips(passInfo.getTotalTrips())
+                .passTier(passTier)
+                .totalTrips(totalTrips)
                 .build();
         FareResultDTO fareResult = pricingClientWrapper.calculateFare(pricingRequest);
         log.info("[TripService] Tarif : Base={} | Réduction={} | Final={} FCFA",
@@ -231,7 +236,7 @@ public class TripService {
 
     private BigDecimal getTotalDepenseAujourdhui(UUID userId) {
         LocalDateTime debutJournee = LocalDate.now().atStartOfDay();
-        LocalDateTime finJournee   = debutJournee.plusDays(1);
+        LocalDateTime finJournee = debutJournee.plusDays(1);
         return tripRepository
                 .findByUserIdAndCreatedAtBetween(userId, debutJournee, finJournee)
                 .stream()
@@ -327,5 +332,9 @@ public class TripService {
     @Transactional(readOnly = true)
     public List<Trip> getTousLesTrajets() {
         return tripRepository.findAll();
+    }
+
+    private int countCompletedTrips(UUID userId) {
+        return (int) tripRepository.countByUserIdAndStatus(userId, TripStatus.COMPLETED);
     }
 }

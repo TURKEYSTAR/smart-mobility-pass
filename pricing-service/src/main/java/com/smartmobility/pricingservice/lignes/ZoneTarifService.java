@@ -3,28 +3,15 @@ package com.smartmobility.pricingservice.lignes;
 import com.smartmobility.pricingservice.entity.TransportType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
-import java.util.Optional;
+import java.math.RoundingMode;
+import java.time.LocalTime;
 
 /**
- * ZoneTarifService — calcule le tarif en fonction des zones de départ et d'arrivée.
- *
- * BUS_CLASSIQUE :
- *   - Même zone      → 150 FCFA
- *   - Différence 1   → 200 FCFA
- *   - Différence 2   → 250 FCFA
- *   - Différence 3+  → 300 FCFA
- *
- * BRT :
- *   - Même zone      → 400 FCFA
- *   - Différence 1   → 800 FCFA
- *   - Différence 2+  → 1000 FCFA
- *
- * TER (2e classe) :
- *   - Même zone      → 500 FCFA
- *   - Différence 1+  → 1000 FCFA
+ * ZoneTarifService — calcule le tarif par zones + devis détaillé avec réductions.
  */
 @Service
 @RequiredArgsConstructor
@@ -33,21 +20,31 @@ public class ZoneTarifService {
 
     private final LigneRepository ligneRepository;
 
-    /**
-     * Calcule le tarif selon la ligne, l'arrêt de départ et l'arrêt d'arrivée.
-     *
-     * @param transportType  type de transport
-     * @param ligneId        identifiant de la ligne (ex: "BRT_B1")
-     * @param arretDepartId  identifiant de l'arrêt de départ
-     * @param arretArriveeId identifiant de l'arrêt d'arrivée
-     * @return montant en FCFA
-     */
+    @Value("${pricing.off-peak.start-hour:22}")
+    private int offPeakStartHour;
+
+    @Value("${pricing.off-peak.end-hour:6}")
+    private int offPeakEndHour;
+
+    @Value("${pricing.discount.off-peak:20}")
+    private BigDecimal offPeakDiscountPercent;
+
+    @Value("${pricing.discount.loyalty.trips-required:10}")
+    private int loyaltyTripsRequired;
+
+    @Value("${pricing.discount.loyalty.percentage:5}")
+    private BigDecimal loyaltyDiscountPercent;
+
+    // ================================================================
+    // Calcul tarif brut (utilisé par FareCalculatorService)
+    // ================================================================
+
     public BigDecimal calculerTarif(TransportType transportType,
                                     String ligneId,
                                     String arretDepartId,
                                     String arretArriveeId) {
 
-        Arret depart  = ligneRepository.getArretById(ligneId, arretDepartId)
+        Arret depart = ligneRepository.getArretById(ligneId, arretDepartId)
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Arrêt de départ introuvable : " + arretDepartId + " sur ligne " + ligneId));
 
@@ -56,29 +53,27 @@ public class ZoneTarifService {
                         "Arrêt d'arrivée introuvable : " + arretArriveeId + " sur ligne " + ligneId));
 
         int diffZones = Math.abs(arrivee.getNumeroZone() - depart.getNumeroZone());
+        BigDecimal tarif = tarifParType(transportType, diffZones);
 
-        BigDecimal tarif = switch (transportType) {
-            case BUS_CLASSIQUE -> calculerTarifBus(diffZones);
-            case BRT           -> calculerTarifBrt(diffZones);
-            case TER           -> calculerTarifTer(diffZones);
-        };
-
-        log.info("[ZoneTarif] {} | {} → {} | Zone {} → Zone {} | diff={} | tarif={} FCFA",
+        log.info("[ZoneTarif] {} | {} → {} | Zone {} → {} | diff={} | tarif={} FCFA",
                 transportType, depart.getNom(), arrivee.getNom(),
                 depart.getNumeroZone(), arrivee.getNumeroZone(), diffZones, tarif);
 
         return tarif;
     }
 
-    /**
-     * Retourne le tarif pour un arrêt donné (utilisé pour la validation avant création du trajet).
-     */
-    public TarifInfo getTarifInfo(TransportType transportType,
-                                   String ligneId,
-                                   String arretDepartId,
-                                   String arretArriveeId) {
+    // ================================================================
+    // Devis détaillé — utilisé par GET /pricing/tarif (frontend)
+    // ================================================================
 
-        Arret depart  = ligneRepository.getArretById(ligneId, arretDepartId)
+    public TarifInfo getTarifInfo(TransportType transportType,
+                                  String ligneId,
+                                  String arretDepartId,
+                                  String arretArriveeId,
+                                  String passTier,
+                                  int totalTrips) {
+
+        Arret depart = ligneRepository.getArretById(ligneId, arretDepartId)
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Arrêt de départ introuvable : " + arretDepartId));
 
@@ -87,11 +82,62 @@ public class ZoneTarifService {
                         "Arrêt d'arrivée introuvable : " + arretArriveeId));
 
         int diffZones = Math.abs(arrivee.getNumeroZone() - depart.getNumeroZone());
-        BigDecimal tarif = switch (transportType) {
-            case BUS_CLASSIQUE -> calculerTarifBus(diffZones);
-            case BRT           -> calculerTarifBrt(diffZones);
-            case TER           -> calculerTarifTer(diffZones);
-        };
+        BigDecimal tarifBase = tarifParType(transportType, diffZones);
+
+        // ── Heure serveur ──────────────────────────────────────────
+        int currentHour = LocalTime.now().getHour();
+        boolean isOffPeak = currentHour >= offPeakStartHour || currentHour < offPeakEndHour;
+
+        // ── Réduction heures creuses ───────────────────────────────
+        BigDecimal offPeakDiscount = null;
+        String offPeakLabel = null;
+        BigDecimal running = tarifBase;
+
+        if (isOffPeak) {
+            offPeakDiscount = tarifBase
+                    .multiply(offPeakDiscountPercent)
+                    .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+            offPeakLabel = "Heures creuses (" + currentHour + "h) -" + offPeakDiscountPercent.intValue() + "%";
+            running = running.subtract(offPeakDiscount);
+        }
+
+        // ── Réduction tier ─────────────────────────────────────────
+        BigDecimal tierDiscount = null;
+        String tierLabel = null;
+
+        if (passTier != null && !passTier.equalsIgnoreCase("STANDARD") && !passTier.isBlank()) {
+            BigDecimal tierPct = switch (passTier.toUpperCase()) {
+                case "SILVER"   -> BigDecimal.valueOf(10);
+                case "GOLD"     -> BigDecimal.valueOf(15);
+                case "PLATINUM" -> BigDecimal.valueOf(30);
+                default         -> BigDecimal.ZERO;
+            };
+            if (tierPct.compareTo(BigDecimal.ZERO) > 0) {
+                tierDiscount = running
+                        .multiply(tierPct)
+                        .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+                tierLabel = "Abonnement " + passTier.toUpperCase() + " -" + tierPct.intValue() + "%";
+                running = running.subtract(tierDiscount);
+            }
+        }
+
+        // ── Réduction fidélité ─────────────────────────────────────
+        BigDecimal loyaltyDiscount = null;
+        String loyaltyLabel = null;
+
+        if (totalTrips >= loyaltyTripsRequired) {
+            loyaltyDiscount = running
+                    .multiply(loyaltyDiscountPercent)
+                    .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+            loyaltyLabel = "Fidélité (" + totalTrips + " trajets) -" + loyaltyDiscountPercent.intValue() + "%";
+            running = running.subtract(loyaltyDiscount);
+        }
+
+        BigDecimal totalDiscount = tarifBase.subtract(running).max(BigDecimal.ZERO);
+        BigDecimal tarifFinal = running.max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
+
+        log.info("[ZoneTarif] Devis {} | base={} | remises={} | final={} FCFA",
+                transportType, tarifBase, totalDiscount, tarifFinal);
 
         return TarifInfo.builder()
                 .arretDepart(depart.getNom())
@@ -99,12 +145,34 @@ public class ZoneTarifService {
                 .zoneDepart(depart.getNumeroZone())
                 .zoneArrivee(arrivee.getNumeroZone())
                 .diffZones(diffZones)
-                .tarif(tarif)
                 .transportType(transportType.name())
+                .tarifBase(tarifBase)
+                .offPeakDiscount(offPeakDiscount)
+                .offPeakLabel(offPeakLabel)
+                .tierDiscount(tierDiscount)
+                .tierLabel(tierLabel)
+                .loyaltyDiscount(loyaltyDiscount)
+                .loyaltyLabel(loyaltyLabel)
+                .totalDiscount(totalDiscount)
+                .tarif(tarifFinal)
+                .offPeakHour(isOffPeak)
+                .currentHour(currentHour)
+                .totalTrips(totalTrips)
+                .passTier(passTier)
                 .build();
     }
 
-    // ── BUS CLASSIQUE ──────────────────────────────────────────────
+    // ================================================================
+    // Tarifs par type
+    // ================================================================
+
+    private BigDecimal tarifParType(TransportType type, int diffZones) {
+        return switch (type) {
+            case BUS_CLASSIQUE -> calculerTarifBus(diffZones);
+            case BRT           -> calculerTarifBrt(diffZones);
+            case TER           -> calculerTarifTer(diffZones);
+        };
+    }
 
     private BigDecimal calculerTarifBus(int diffZones) {
         return switch (diffZones) {
@@ -115,8 +183,6 @@ public class ZoneTarifService {
         };
     }
 
-    // ── BRT ────────────────────────────────────────────────────────
-
     private BigDecimal calculerTarifBrt(int diffZones) {
         return switch (diffZones) {
             case 0  -> BigDecimal.valueOf(400);
@@ -125,11 +191,7 @@ public class ZoneTarifService {
         };
     }
 
-    // ── TER (2e classe) ────────────────────────────────────────────
-
     private BigDecimal calculerTarifTer(int diffZones) {
-        return diffZones == 0
-                ? BigDecimal.valueOf(500)
-                : BigDecimal.valueOf(1000);
+        return diffZones == 0 ? BigDecimal.valueOf(500) : BigDecimal.valueOf(1000);
     }
 }

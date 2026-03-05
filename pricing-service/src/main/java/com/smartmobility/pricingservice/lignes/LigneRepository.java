@@ -52,7 +52,7 @@ public class LigneRepository {
         // Ligne 1 — Dakar Plateau ↔ Pikine
         lignes.add(Ligne.builder()
                 .id("BUS_L1")
-                .nom("Ligne 1 — Plateau ↔ Pikine")
+                .nom("221")
                 .description("Dakar Plateau → Sandaga → Colobane → Liberté → Pikine")
                 .arrets(List.of(
                         Arret.builder().id("BUS_L1_PLATEAU").nom("Dakar Plateau").numeroZone(1).build(),
@@ -69,7 +69,7 @@ public class LigneRepository {
         // Ligne 2 — Dakar Plateau ↔ Guédiawaye
         lignes.add(Ligne.builder()
                 .id("BUS_L2")
-                .nom("Ligne 2 — Plateau ↔ Guédiawaye")
+                .nom("220")
                 .description("Dakar Plateau → Fann → HLM → Guédiawaye")
                 .arrets(List.of(
                         Arret.builder().id("BUS_L2_PLATEAU").nom("Dakar Plateau").numeroZone(1).build(),
@@ -84,7 +84,7 @@ public class LigneRepository {
         // Ligne 3 — Dakar Plateau ↔ Rufisque
         lignes.add(Ligne.builder()
                 .id("BUS_L3")
-                .nom("Ligne 3 — Plateau ↔ Rufisque")
+                .nom("234")
                 .description("Dakar Plateau → Thiaroye → Mbao → Rufisque")
                 .arrets(List.of(
                         Arret.builder().id("BUS_L3_PLATEAU").nom("Dakar Plateau").numeroZone(1).build(),
@@ -100,7 +100,7 @@ public class LigneRepository {
         // Ligne 4 — Petersen ↔ Yeumbeul
         lignes.add(Ligne.builder()
                 .id("BUS_L4")
-                .nom("Ligne 4 — Petersen ↔ Yeumbeul")
+                .nom("11")
                 .description("Petersen → Liberté → Parcelles → Yeumbeul")
                 .arrets(List.of(
                         Arret.builder().id("BUS_L4_PETERSEN").nom("Petersen").numeroZone(1).build(),
@@ -115,7 +115,7 @@ public class LigneRepository {
         // Ligne 5 — Dakar Plateau ↔ Diamniadio (ligne express)
         lignes.add(Ligne.builder()
                 .id("BUS_L5")
-                .nom("Ligne 5 — Plateau ↔ Diamniadio")
+                .nom("30")
                 .description("Dakar Plateau → Rufisque → Bargny → Diamniadio")
                 .arrets(List.of(
                         Arret.builder().id("BUS_L5_PLATEAU").nom("Dakar Plateau").numeroZone(1).build(),
@@ -141,17 +141,17 @@ public class LigneRepository {
         // B1 — Omnibus (toutes les 14 stations opérationnelles)
         lignes.add(Ligne.builder()
                 .id("BRT_B1")
-                .nom("B1 — Omnibus")
-                .description("Papa Gueye Fall (Petersen) ↔ Préfecture Guédiawaye")
+                .nom("B1")
+                .description("Toutes les stations")
                 .arrets(List.of(
                         // Zone 1 — Plateau / Centre-ville
-                        Arret.builder().id("BRT_PETERSEN").nom("Papa Gueye Fall (Petersen)").numeroZone(1).build(),
+                        Arret.builder().id("BRT_PETERSEN").nom("Petersen").numeroZone(1).build(),
                         Arret.builder().id("BRT_NATION").nom("Place de la Nation").numeroZone(1).build(),
                         Arret.builder().id("BRT_GRAND_DAKAR").nom("Grand Dakar").numeroZone(1).build(),
                         Arret.builder().id("BRT_SACRE_COEUR").nom("Sacré Cœur").numeroZone(1).build(),
                         // Zone 2 — Médina / Liberté
                         Arret.builder().id("BRT_LIBERTE6").nom("Liberté 6").numeroZone(2).build(),
-                        Arret.builder().id("BRT_KHAR_YALLA").nom("Khar Yàlla").numeroZone(2).build(),
+                        Arret.builder().id("BRT_KHAR_YALLA").nom("Khar Yalla").numeroZone(2).build(),
                         Arret.builder().id("BRT_CARDINAL").nom("Cardinal Hyacinthe Thiandoum").numeroZone(2).build(),
                         Arret.builder().id("BRT_GRAND_MEDINE").nom("Grand Médine").numeroZone(2).build(),
                         // Zone 3 — Parcelles / Guédiawaye
@@ -167,10 +167,10 @@ public class LigneRepository {
         // B2 — Semi-express (7 stations)
         lignes.add(Ligne.builder()
                 .id("BRT_B2")
-                .nom("B2 — Semi-express")
-                .description("Papa Gueye Fall (Petersen) ↔ Préfecture Guédiawaye — 7 stations")
+                .nom("B2")
+                .description("7 stations")
                 .arrets(List.of(
-                        Arret.builder().id("BRT_B2_PETERSEN").nom("Papa Gueye Fall (Petersen)").numeroZone(1).build(),
+                        Arret.builder().id("BRT_B2_PETERSEN").nom("Petersen").numeroZone(1).build(),
                         Arret.builder().id("BRT_B2_SACRE_COEUR").nom("Sacré Cœur").numeroZone(1).build(),
                         Arret.builder().id("BRT_B2_GRAND_MEDINE").nom("Grand Médine").numeroZone(2).build(),
                         Arret.builder().id("BRT_B2_PARCELLES").nom("Parcelles Assainies").numeroZone(3).build(),
@@ -183,12 +183,12 @@ public class LigneRepository {
         // B3 — Semi-express heures de pointe
         lignes.add(Ligne.builder()
                 .id("BRT_B3")
-                .nom("B3 — Semi-express (heures de pointe)")
-                .description("Papa Gueye Fall ↔ Préfecture Guédiawaye — heures de pointe uniquement")
+                .nom("B3")
+                .description("heures de pointe uniquement")
                 .arrets(List.of(
-                        Arret.builder().id("BRT_B3_PETERSEN").nom("Papa Gueye Fall (Petersen)").numeroZone(1).build(),
+                        Arret.builder().id("BRT_B3_PETERSEN").nom("Petersen").numeroZone(1).build(),
                         Arret.builder().id("BRT_B3_NATION").nom("Place de la Nation").numeroZone(1).build(),
-                        Arret.builder().id("BRT_B3_KHAR_YALLA").nom("Khar Yàlla").numeroZone(2).build(),
+                        Arret.builder().id("BRT_B3_KHAR_YALLA").nom("Khar Yalla").numeroZone(2).build(),
                         Arret.builder().id("BRT_B3_CROISEMENT22").nom("Croisement 22").numeroZone(3).build(),
                         Arret.builder().id("BRT_B3_PARCELLES").nom("Parcelles Assainies").numeroZone(3).build(),
                         Arret.builder().id("BRT_B3_GOLF_NORD").nom("Golf Nord").numeroZone(3).build(),
@@ -208,25 +208,25 @@ public class LigneRepository {
     private static List<Ligne> buildTerLines() {
         return List.of(
                 Ligne.builder()
-                        .id("TER_L1")
+                        .id("TER")
                         .nom("TER — Dakar ↔ Diamniadio")
                         .description("13 gares — Zone 1: Dakar→Thiaroye | Zone 2: Thiaroye→Bargny | Zone 3: Bargny→Diamniadio")
                         .arrets(List.of(
                                 // Zone 1 — Dakar → Thiaroye
                                 Arret.builder().id("TER_DAKAR").nom("Gare de Dakar").numeroZone(1).build(),
                                 Arret.builder().id("TER_COLOBANE").nom("Colobane").numeroZone(1).build(),
-                                Arret.builder().id("TER_BIETRI").nom("Biétri").numeroZone(1).build(),
                                 Arret.builder().id("TER_HANN").nom("Hann").numeroZone(1).build(),
+                                Arret.builder().id("TER_DALIFORT").nom("Dalifort").numeroZone(1).build(),
+                                Arret.builder().id("TER_BM").nom("Baux Maraichers").numeroZone(1).build(),
+                                Arret.builder().id("TER_PIKINE").nom("Pikine").numeroZone(1).build(),
                                 Arret.builder().id("TER_THIAROYE").nom("Thiaroye").numeroZone(1).build(),
                                 // Zone 2 — Thiaroye → Bargny
-                                Arret.builder().id("TER_MBAO").nom("Mbao").numeroZone(2).build(),
+                                Arret.builder().id("TER_YEUMBEUL").nom("Yeumbeul").numeroZone(2).build(),
                                 Arret.builder().id("TER_KEUR_MBAYE_FALL").nom("Keur Mbaye Fall").numeroZone(2).build(),
+                                Arret.builder().id("TER_PNR").nom("PNR").numeroZone(2).build(),
                                 Arret.builder().id("TER_RUFISQUE").nom("Rufisque").numeroZone(2).build(),
                                 Arret.builder().id("TER_BARGNY").nom("Bargny").numeroZone(2).build(),
                                 // Zone 3 — Bargny → Diamniadio
-                                Arret.builder().id("TER_DOUGAR").nom("Dougar").numeroZone(3).build(),
-                                Arret.builder().id("TER_SEBIKOTANE").nom("Sébikotane").numeroZone(3).build(),
-                                Arret.builder().id("TER_KEUR_MOUSSA").nom("Keur Moussa").numeroZone(3).build(),
                                 Arret.builder().id("TER_DIAMNIADIO").nom("Diamniadio").numeroZone(3).build()
                         ))
                         .build()

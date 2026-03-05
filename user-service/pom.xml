@@ -20,7 +20,6 @@
     </properties>
 
     <dependencies>
-        <!-- Web + JPA + Validation -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webmvc</artifactId>
@@ -34,7 +33,6 @@
             <artifactId>jakarta.validation-api</artifactId>
         </dependency>
 
-        <!-- Sécurité minimale (CSRF off, headers X-User-Id/Role de la Gateway) -->
         <dependency>
             <groupId>org.springframework.security</groupId>
             <artifactId>spring-security-config</artifactId>
@@ -93,6 +91,11 @@
             <optional>true</optional>
         </dependency>
 
+        <dependency>
+            <groupId>io.github.openfeign</groupId>
+            <artifactId>feign-slf4j</artifactId>
+        </dependency>
+
         <!-- Tests -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -106,6 +109,14 @@
         <dependency>
             <groupId>org.springframework.amqp</groupId>
             <artifactId>spring-amqp</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-openfeign-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-annotations</artifactId>
         </dependency>
     </dependencies>
 

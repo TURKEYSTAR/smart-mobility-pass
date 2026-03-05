@@ -73,4 +73,5 @@ public class TripController {
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }
+
 }
