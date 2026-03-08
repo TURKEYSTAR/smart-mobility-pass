@@ -21,4 +21,5 @@ public class FareResultDTO {
     private boolean cappedByDailyLimit;
     private boolean fallbackUsed;
     private String note;
+    private String executionChain;
 }

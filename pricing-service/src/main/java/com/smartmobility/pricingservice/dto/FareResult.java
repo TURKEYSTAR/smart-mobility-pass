@@ -1,5 +1,6 @@
 package com.smartmobility.pricingservice.dto;
 
+import jakarta.persistence.Transient;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -23,4 +24,6 @@ public class FareResult {
     private boolean cappedByDailyLimit;     // True si plafond journalier atteint
     private boolean fallbackUsed;           // False (toujours false côté Pricing Service)
     private String note;                    // Info supplémentaire
+    @Transient  // pas persisté
+    private String executionChain;
 }

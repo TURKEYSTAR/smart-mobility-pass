@@ -14,6 +14,8 @@ import com.smartmobility.pricingservice.service.FareCalculatorService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.env.Environment;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -30,13 +32,22 @@ public class PricingController {
     private final LigneRepository ligneRepository;
     private final ZoneTarifService zoneTarifService;
 
+    @Autowired
+    private Environment environment;
+
+
     @PostMapping("/calculate")
     public ResponseEntity<FareResult> calculateFare(@Valid @RequestBody PricingRequest request) {
         log.info("[PricingController] totalTrips reçu={} | passTier={}",
                 request.getTotalTrips(), request.getPassTier());
         log.info("[PricingController] POST /pricing/calculate - TripId={}, Type={}, Ligne={}",
                 request.getTripId(), request.getTransportType(), request.getLigneId());
-        return ResponseEntity.ok(fareCalculatorService.calculateFare(request));
+
+        FareResult result = fareCalculatorService.calculateFare(request);
+        String port = environment.getProperty("local.server.port");
+        result.setExecutionChain("pricing-service instance:" + port);
+
+        return ResponseEntity.ok(result);
     }
 
     @GetMapping("/lignes/{transportType}")
